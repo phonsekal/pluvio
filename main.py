@@ -23,6 +23,8 @@ INVENTORY_FOLDER_ID = os.environ.get("INVENTORY_FOLDER_ID", "1iEcdKlf41sAOZpjBPB
 CSV_PATH = Path(__file__).parent / "databmnbuku.csv"
 GDRIVE_CREDS_JSON = os.environ.get("GDRIVE_CREDS_JSON", "")
 CREDS_PATH = Path(__file__).parent / "gdrive-creds.json"
+# Also check for existing service account JSON files
+CREDS_GLOB = list(Path(__file__).parent.glob("*.json"))
 
 
 def _get_gdrive_creds():
@@ -30,6 +32,18 @@ def _get_gdrive_creds():
     creds_json = GDRIVE_CREDS_JSON
     if not creds_json and CREDS_PATH.exists():
         creds_json = CREDS_PATH.read_text()
+    # Also search for any service account JSON in project root
+    if not creds_json:
+        for p in CREDS_GLOB:
+            if p.name in ("vercel.json",):
+                continue
+            try:
+                data = json.loads(p.read_text())
+                if data.get("type") == "service_account":
+                    creds_json = p.read_text()
+                    break
+            except (json.JSONDecodeError, KeyError):
+                continue
     if not creds_json:
         return None
     return json.loads(creds_json)
@@ -205,11 +219,14 @@ def _download_excel(file_id):
 
 
 def _parse_excel_file(path):
-    """Parse Excel file with openpyxl."""
+    """Parse Excel file with openpyxl.
+    
+    Expected columns: E=NUP, Y=Status Inventarisasi
+    """
     try:
         import openpyxl
 
-        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        wb = openpyxl.load_workbook(path, data_only=True)
         ws = wb.active
         rows = list(ws.iter_rows(values_only=True))
         wb.close()
@@ -219,12 +236,10 @@ def _parse_excel_file(path):
         nup_idx = None
         status_idx = None
         for i, h in enumerate(headers):
-            if h in ("nup", "kode", "kode barang", "no"):
-                if nup_idx is None:
-                    nup_idx = i
-            if "inventarisasi" in h or "status" == h:
-                if status_idx is None:
-                    status_idx = i
+            if "nup" in h:
+                nup_idx = i
+            if "inventarisasi" in h or h == "status inventarisasi":
+                status_idx = i
         if nup_idx is None:
             return []
         items = []
