@@ -54,6 +54,7 @@ _csv_cache = None
 
 
 def read_csv_local():
+    """Read databmnbuku.csv. Kodifikasi = Kode1/Kode2/Kode3."""
     global _csv_cache
     if _csv_cache is not None:
         return _csv_cache
@@ -65,7 +66,11 @@ def read_csv_local():
                 nup = row.get("NUP", "").strip()
                 merk = row.get("Merk", "").strip()
                 judul = merk if merk and merk != "-" else "Monografi"
-                kodifikasi = row.get("Kode1", "").strip()
+                k1 = row.get("Kode1", "").strip()
+                k2 = row.get("Kode2", "").strip()
+                k3 = row.get("Kode3", "").strip()
+                parts = [k for k in [k1, k2, k3] if k and k != "-"]
+                kodifikasi = "/".join(parts) if parts else ""
                 if nup:
                     items.append({"nup": nup, "judul": judul, "kodifikasi": kodifikasi})
     except Exception as e:
@@ -222,6 +227,7 @@ def _parse_excel_file(path):
     """Parse Excel file with openpyxl.
     
     Expected columns: E=NUP, Y=Status Inventarisasi
+    NUP from openpyxl may come as float (e.g. '3.0'), strip to int.
     """
     try:
         import openpyxl
@@ -246,7 +252,18 @@ def _parse_excel_file(path):
         for row in rows[1:]:
             vals = list(row) + [None] * max(0, len(headers) - len(row))
             nup_raw = vals[nup_idx]
-            nup = str(nup_raw).strip() if nup_raw is not None else ""
+            if nup_raw is None:
+                continue
+            # Strip float decimals (e.g. 3.0 → '3', 11.0 → '11')
+            if isinstance(nup_raw, float):
+                nup = str(int(nup_raw))
+            else:
+                nup = str(nup_raw).strip()
+                if nup.endswith(".0"):
+                    try:
+                        nup = str(int(float(nup)))
+                    except ValueError:
+                        pass
             if not nup or nup.lower() in ("none", ""):
                 continue
             status = ""
@@ -311,64 +328,68 @@ def get_kodifikasi_group(kodifikasi: str) -> str:
 
 def compare_data(csv_items, sheet_items, inventory_items):
     """Compare CSV, Census Sheet, and Inventory Excel.
-
-    Iterate from Census Sheet to preserve all rows.
-    Then check inventory to split 'Sensus, Belum Ditemukan'.
+    
+    Iterate from CSV side so total always equals CSV count.
+    For each CSV item:
+      1. In Census Sheet with Status='Ditemukan' → sensus_ditemukan
+      2. In Census Sheet with Status='' → sudah_ditemukan_belum_sensus
+      3. NOT in Census Sheet, but in Excel → sensus_belum_ditemukan
+      4. NOT in Census Sheet, NOT in Excel → belum_sensus
     """
-    csv_lookup = {}
-    for ci in csv_items:
-        csv_lookup[ci["nup"]] = ci
+    # Build Census Sheet lookup (NUP → status)
+    sheet_lookup = {}
+    for si in sheet_items:
+        sheet_lookup[si["nup"]] = si
 
-    # NUP set from inventory (column E in Excel, Status Inventarisasi in column Y)
+    # Build Excel inventory NUP set (strip/normalize)
     inventory_nups = set()
     for inv in inventory_items:
-        nup = inv.get("nup", "").strip().lower()
+        nup = inv.get("nup", "").strip()
         if nup:
             inventory_nups.add(nup)
 
+    belum_sensus = []
     sensus_ditemukan = []
-    sensus_belum_ditemukan = []
-    sudah_ditemukan_belum_sensus = []
-    matched_nups = set()
+    sensus_belum_ditemukan = []  # Ditemukan, Belum Sensus
+    sudah_ditemukan_belum_sensus = []  # Sensus, Belum Dikirim
 
-    for si in sheet_items:
-        nup = si["nup"]
-        judul_sheet = si["judul"]
-        ci = csv_lookup.get(nup, {})
-        kodifikasi = ci.get("kodifikasi", "")
-        judul_csv = ci.get("judul", "")
-        display_judul = judul_sheet if judul_sheet else judul_csv
-        matched_nups.add(nup)
+    for ci in csv_items:
+        nup = ci["nup"]
+        judul = ci["judul"]
+        kodifikasi = ci["kodifikasi"]
 
-        if si["status_ditemukan"]:
-            sensus_ditemukan.append({
-                "nup": nup,
-                "judul": display_judul,
-                "kodifikasi": kodifikasi,
-            })
-        else:
-            # Check inventory for "Sensus, Belum Ditemukan"
-            if inventory_nups and nup.strip().lower() not in inventory_nups:
-                sensus_belum_ditemukan.append({
-                    "nup": nup,
-                    "judul": display_judul,
-                    "kodifikasi": kodifikasi,
+        if nup in sheet_lookup:
+            si = sheet_lookup[nup]
+            display_judul = si["judul"] if si["judul"] else judul
+            if si["status_ditemukan"]:
+                # Category 1: Sensus & Ditemukan
+                sensus_ditemukan.append({
+                    "nup": nup, "judul": display_judul, "kodifikasi": kodifikasi,
                 })
             else:
+                # Category 2: Ditemukan, Belum Sensus (in Sheet, Status='', not in Excel)
+                # Check if also in Excel inventory
+                if nup in inventory_nups:
+                    # In Sheet AND in Excel but Status='' → Sensus, Belum Dikirim
+                    sudah_ditemukan_belum_sensus.append({
+                        "nup": nup, "judul": display_judul, "kodifikasi": kodifikasi,
+                    })
+                else:
+                    sensus_belum_ditemukan.append({
+                        "nup": nup, "judul": display_judul, "kodifikasi": kodifikasi,
+                    })
+        else:
+            # Not in Census Sheet
+            if nup in inventory_nups:
+                # Category 3: Sensus, Belum Dikirim (in Excel but not in Census Sheet)
                 sudah_ditemukan_belum_sensus.append({
-                    "nup": nup,
-                    "judul": display_judul,
-                    "kodifikasi": kodifikasi,
+                    "nup": nup, "judul": judul, "kodifikasi": kodifikasi,
                 })
-
-    belum_sensus = []
-    for ci in csv_items:
-        if ci["nup"] not in matched_nups:
-            belum_sensus.append({
-                "nup": ci["nup"],
-                "judul": ci["judul"],
-                "kodifikasi": ci["kodifikasi"],
-            })
+            else:
+                # Category 4: Belum Ditemukan dan Dikirim
+                belum_sensus.append({
+                    "nup": nup, "judul": judul, "kodifikasi": kodifikasi,
+                })
 
     return {
         "belum_sensus": belum_sensus,
