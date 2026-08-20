@@ -119,52 +119,57 @@ def get_kodifikasi_group(kodifikasi: str) -> str:
 def compare_data(csv_items, sheet_items):
     """Compare CSV with Google Sheet.
     
+    Iterate from Sheet side to preserve all rows (including NUP duplicates).
     Categories (based only on Status column in Sheet, ignoring Catatan):
-    1. belum_sensus       - item not found in Sheet at all
-    2. sensus_ditemukan   - in Sheet with Status == 'Ditemukan'
-    3. sensus_belum_ditemukan - in Sheet with Status != 'Ditemukan'
-    4. sudah_ditemukan_belum_sensus - same as 3, different label for display
+    1. belum_sensus              - CSV item not found in Sheet
+    2. sensus_ditemukan          - Sheet row with Status == 'Ditemukan'
+    3. sudah_ditemukan_belum_sensus - Sheet row with Status != 'Ditemukan'
     """
-    sheet_lookup = {}
-    for item in sheet_items:
-        sheet_lookup[item["nup"]] = item
-    
-    belum_sensus = []
-    sensus_ditemukan = []
-    sensus_belum_ditemukan = []
-    sudah_ditemukan_belum_sensus = []
-    
+    # Build CSV lookup for kodifikasi and Merk
+    csv_lookup = {}
     for csv_item in csv_items:
-        nup = csv_item["nup"]
-        judul = csv_item["judul"]  # from Merk column
-        kodifikasi = csv_item["kodifikasi"]
-        if nup in sheet_lookup:
-            sheet_item = sheet_lookup[nup]
-            judul_sheet = sheet_item["judul"]
-            display_judul = judul_sheet if judul_sheet else judul
-            if sheet_item["status_ditemukan"]:
-                sensus_ditemukan.append({
-                    "nup": nup,
-                    "judul": display_judul,
-                    "kodifikasi": kodifikasi,
-                })
-            else:
-                sudah_ditemukan_belum_sensus.append({
-                    "nup": nup,
-                    "judul": display_judul,
-                    "kodifikasi": kodifikasi,
-                })
-        else:
-            belum_sensus.append({
+        csv_lookup[csv_item["nup"]] = csv_item
+    
+    sensus_ditemukan = []
+    sudah_ditemukan_belum_sensus = []
+    matched_nups = set()
+    
+    # Iterate over Sheet items (preserves duplicates)
+    for sheet_item in sheet_items:
+        nup = sheet_item["nup"]
+        judul_sheet = sheet_item["judul"]
+        csv_item = csv_lookup.get(nup, {})
+        kodifikasi = csv_item.get("kodifikasi", "")
+        judul_csv = csv_item.get("judul", "")
+        display_judul = judul_sheet if judul_sheet else judul_csv
+        matched_nups.add(nup)
+        if sheet_item["status_ditemukan"]:
+            sensus_ditemukan.append({
                 "nup": nup,
-                "judul": judul,
-                "kodifikasi": kodifikasi
+                "judul": display_judul,
+                "kodifikasi": kodifikasi,
+            })
+        else:
+            sudah_ditemukan_belum_sensus.append({
+                "nup": nup,
+                "judul": display_judul,
+                "kodifikasi": kodifikasi,
+            })
+    
+    # CSV items not in Sheet = belum_sensus
+    belum_sensus = []
+    for csv_item in csv_items:
+        if csv_item["nup"] not in matched_nups:
+            belum_sensus.append({
+                "nup": csv_item["nup"],
+                "judul": csv_item["judul"],
+                "kodifikasi": csv_item["kodifikasi"]
             })
     
     return {
         "belum_sensus": belum_sensus,
         "sensus_ditemukan": sensus_ditemukan,
-        "sensus_belum_ditemukan": sensus_belum_ditemukan,
+        "sensus_belum_ditemukan": [],
         "sudah_ditemukan_belum_sensus": sudah_ditemukan_belum_sensus
     }
 
@@ -550,14 +555,14 @@ SENsus_HTML = """<!DOCTYPE html>
                         <div class="stat-card clickable" onclick="scrollToSection('sec-bs')"><div class="num" style="color:#f87171">${bs.length}</div><div class="label">❌ Belum di Google Sheet</div></div>
                         <div class="stat-card clickable" onclick="scrollToSection('sec-sd')"><div class="num" style="color:#4ade80">${sd.length}</div><div class="label">✅ Sensus & Ditemukan</div></div>
                         <div class="stat-card clickable" onclick="scrollToSection('sec-sbd')"><div class="num" style="color:#facc15">${sbd.length}</div><div class="label">⚠️ Sensus, Belum Ditemukan</div></div>
-                        <div class="stat-card clickable" onclick="scrollToSection('sec-ds')"><div class="num" style="color:#fb923c">${ds.length}</div><div class="label">📋 Di Sheet, Tanpa Sensus</div></div>
+                        <div class="stat-card clickable" onclick="scrollToSection('sec-ds')"><div class="num" style="color:#fb923c">${ds.length}</div><div class="label">📋 Ditemukan tapi Belum Sensus</div></div>
                         <div class="stat-card"><div class="num" style="color:#60a5fa">${sd.length+sbd.length+ds.length+bs.length}</div><div class="label">📊 Total Data</div></div>
                     </div>
                     <input type="text" class="search-box" placeholder="🔍 Cari NUP atau Judul..." oninput="filterAll(this.value)">
                     <div id="sec-bs">${renderCategory('❌','badge-red','Belum di Google Sheet',bs.length,groupByKodifikasi(bs))}</div>
                     <div id="sec-sd">${renderCategory('✅','badge-green','Sensus & Ditemukan',sd.length,groupByKodifikasi(sd))}</div>
                     <div id="sec-sbd">${renderCategory('⚠️','badge-yellow','Sensus, Belum Ditemukan',sbd.length,groupByKodifikasi(sbd))}</div>
-                    <div id="sec-ds">${renderCategory('📋','badge-orange','Sudah Ditemukan dan Belum Sensus',ds.length,groupByKodifikasi(ds))}</div>
+                    <div id="sec-ds">${renderCategory('📋','badge-orange','Ditemukan tapi Belum Sensus',ds.length,groupByKodifikasi(ds))}</div>
                 `;
             } catch(e) {
                 document.getElementById('content').innerHTML = `<div class="error">❌ Gagal memuat data: ${e.message}</div>`;
