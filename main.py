@@ -361,9 +361,10 @@ async def sensus_page():
     def render_group(data, group_dict, color_class):
         html_parts = []
         for group_name, items in group_dict.items():
+            group_id = f"{color_class}-{group_name}".replace(" ", "-")
             html_parts.append(f'''
-                <div class="kodif-group">
-                    <div class="kodif-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <div class="kodif-group collapsed">
+                    <div class="kodif-header" onclick="toggleGroup(this)">
                         <span class="kodif-label">📁 {group_name}</span>
                         <span class="kodif-count">{len(items)} item</span>
                     </div>
@@ -606,6 +607,9 @@ async def sensus_page():
     </div>
     
     <script>
+        function toggleGroup(el) {{
+            el.parentElement.classList.toggle('collapsed');
+        }}
         function filterAll(query) {{
             const q = query.toLowerCase();
             document.querySelectorAll('.kodif-list tr').forEach(row => {{
@@ -613,6 +617,10 @@ async def sensus_page():
                 const text = row.textContent.toLowerCase();
                 row.style.display = text.includes(q) ? '' : 'none';
             }});
+            // Expand all groups when searching
+            if (q.length > 0) {{
+                document.querySelectorAll('.kodif-group.collapsed').forEach(g => g.classList.remove('collapsed'));
+            }}
         }}
     </script>
 </body>
