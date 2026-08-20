@@ -62,7 +62,8 @@ def read_csv_local():
             reader = csv.DictReader(f, delimiter=";")
             for row in reader:
                 nup = row.get("NUP", "").strip()
-                judul = row.get("Nama Barang", "").strip()
+                merk = row.get("Merk", "").strip()
+                judul = merk if merk and merk != "-" else "Monografi"
                 kodifikasi = row.get("Kode1", "").strip()
                 if nup:
                     items.append({
@@ -128,33 +129,35 @@ def compare_data(csv_items, sheet_items):
     
     for csv_item in csv_items:
         nup = csv_item["nup"]
+        judul = csv_item["judul"]  # from Merk column
+        kodifikasi = csv_item["kodifikasi"]
         if nup in sheet_lookup:
             sheet_item = sheet_lookup[nup]
+            judul_sheet = sheet_item["judul"]
+            # Prefer sheet judul over CSV Merk if sheet has it
+            display_judul = judul_sheet if judul_sheet else judul
             if sheet_item["catatan"] == "sensus" and sheet_item["status_ditemukan"]:
                 sensus_ditemukan.append({
                     "nup": nup,
-                    "judul": csv_item["judul"],
-                    "kodifikasi": csv_item["kodifikasi"],
-                    "judul_sheet": sheet_item["judul"]
+                    "judul": display_judul,
+                    "kodifikasi": kodifikasi,
                 })
             elif sheet_item["catatan"] == "sensus" and not sheet_item["status_ditemukan"]:
                 sensus_belum_ditemukan.append({
                     "nup": nup,
-                    "judul": csv_item["judul"],
-                    "kodifikasi": csv_item["kodifikasi"],
-                    "judul_sheet": sheet_item["judul"]
+                    "judul": display_judul,
+                    "kodifikasi": kodifikasi,
                 })
             else:
                 di_sheet_tanpa_sensus.append({
                     "nup": nup,
-                    "judul": csv_item["judul"],
-                    "kodifikasi": csv_item["kodifikasi"],
-                    "judul_sheet": sheet_item["judul"]
+                    "judul": display_judul,
+                    "kodifikasi": kodifikasi,
                 })
         else:
             belum_sensus.append({
                 "nup": nup,
-                "judul": csv_item["judul"],
+                "judul": judul,
                 "kodifikasi": csv_item["kodifikasi"]
             })
     
@@ -376,7 +379,10 @@ SENsus_HTML = """<!DOCTYPE html>
             background: rgba(255,255,255,0.05);
             border: 1px solid rgba(255,255,255,0.1);
             border-radius: 14px; padding: 20px; text-align: center;
+            transition: all 0.2s;
         }
+        .stat-card.clickable { cursor: pointer; }
+        .stat-card.clickable:hover { background: rgba(255,255,255,0.1); transform: translateY(-2px); border-color: rgba(167,139,250,0.4); }
         .stat-card .num { font-size: 32px; font-weight: 700; }
         .stat-card .label { font-size: 12px; color: #9ca3af; margin-top: 4px; }
         .category {
@@ -527,6 +533,9 @@ SENsus_HTML = """<!DOCTYPE html>
                 document.querySelectorAll('.category-body').forEach(b => b.style.display = 'block');
             }
         }
+        function scrollToSection(id) {
+            document.getElementById(id).scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
         async function loadData() {
             try {
                 const resp = await fetch('/api/sensus');
@@ -538,17 +547,17 @@ SENsus_HTML = """<!DOCTYPE html>
                 const bs = data.belum_sensus || [];
                 document.getElementById('stats').innerHTML = `
                     <div class="stats">
-                        <div class="stat-card"><div class="num" style="color:#60a5fa">${sd.length+sbd.length+ds.length+bs.length}</div><div class="label">Total CSV</div></div>
-                        <div class="stat-card"><div class="num" style="color:#4ade80">${sd.length}</div><div class="label">Sensus & Ditemukan</div></div>
-                        <div class="stat-card"><div class="num" style="color:#facc15">${sbd.length}</div><div class="label">Sensus, Belum Ditemukan</div></div>
-                        <div class="stat-card"><div class="num" style="color:#fb923c">${ds.length}</div><div class="label">Di Sheet, Tanpa Sensus</div></div>
-                        <div class="stat-card"><div class="num" style="color:#f87171">${bs.length}</div><div class="label">Belum di Google Sheet</div></div>
+                        <div class="stat-card clickable" onclick="scrollToSection('sec-bs')"><div class="num" style="color:#f87171">${bs.length}</div><div class="label">❌ Belum di Google Sheet</div></div>
+                        <div class="stat-card clickable" onclick="scrollToSection('sec-sd')"><div class="num" style="color:#4ade80">${sd.length}</div><div class="label">✅ Sensus & Ditemukan</div></div>
+                        <div class="stat-card clickable" onclick="scrollToSection('sec-sbd')"><div class="num" style="color:#facc15">${sbd.length}</div><div class="label">⚠️ Sensus, Belum Ditemukan</div></div>
+                        <div class="stat-card clickable" onclick="scrollToSection('sec-ds')"><div class="num" style="color:#fb923c">${ds.length}</div><div class="label">📋 Di Sheet, Tanpa Sensus</div></div>
+                        <div class="stat-card"><div class="num" style="color:#60a5fa">${sd.length+sbd.length+ds.length+bs.length}</div><div class="label">📊 Total Data</div></div>
                     </div>
                     <input type="text" class="search-box" placeholder="🔍 Cari NUP atau Judul..." oninput="filterAll(this.value)">
-                    ${renderCategory('✅','badge-green','Sensus & Ditemukan',sd.length,groupByKodifikasi(sd))}
-                    ${renderCategory('⚠️','badge-yellow','Sensus, Belum Ditemukan',sbd.length,groupByKodifikasi(sbd))}
-                    ${renderCategory('📋','badge-orange','Di Sheet, Tanpa Status Sensus',ds.length,groupByKodifikasi(ds))}
-                    ${renderCategory('❌','badge-red','Belum di Google Sheet',bs.length,groupByKodifikasi(bs))}
+                    <div id="sec-bs">${renderCategory('❌','badge-red','Belum di Google Sheet',bs.length,groupByKodifikasi(bs))}</div>
+                    <div id="sec-sd">${renderCategory('✅','badge-green','Sensus & Ditemukan',sd.length,groupByKodifikasi(sd))}</div>
+                    <div id="sec-sbd">${renderCategory('⚠️','badge-yellow','Sensus, Belum Ditemukan',sbd.length,groupByKodifikasi(sbd))}</div>
+                    <div id="sec-ds">${renderCategory('📋','badge-orange','Di Sheet, Tanpa Status Sensus',ds.length,groupByKodifikasi(ds))}</div>
                 `;
             } catch(e) {
                 document.getElementById('content').innerHTML = `<div class="error">❌ Gagal memuat data: ${e.message}</div>`;
