@@ -1,58 +1,45 @@
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 import csv
 import io
 import httpx
 import os
+import json
+import re
+import tempfile
 from pathlib import Path
 from collections import defaultdict
+from datetime import datetime
 
-app = FastAPI(title="PLUVIO - Profil & Sensus BMN")
+app = FastAPI(title="PLUVIO - Sensus BMN")
 
-# Profile data
-PROFILE = {
-    "name": "Hapsari Wirastuti S",
-    "title": "Sekretaris Menteri",
-    "email": "hap.hap@hapsari.com",
-    "bio": "Profesional di bidang administrasi dan manajemen perkantoran dengan pengalaman luas dalam mendukung operasional kementerian. Terampil dalam koordinasi, pengelolaan dokumen, dan komunikasi strategis.",
-    "skills": [
-        "Manajemen Perkantoran",
-        "Koordinasi Acara & Rapat",
-        "Pengelolaan Dokumen Resmi",
-        "Komunikasi & Diplomasi",
-        "Public Speaking",
-        "Time Management"
-    ],
-    "experience": [
-        {
-            "role": "Sekretaris Menteri",
-            "org": "Kementerian",
-            "period": "2020 - Sekarang",
-            "desc": "Mengelola operasional sekretariat, mengkoordinasi rapat tingkat tinggi, serta memastikan kelancaran komunikasi internal dan eksternal kementerian."
-        },
-        {
-            "role": "Staff Administrasi",
-            "org": "Kementerian",
-            "period": "2015 - 2020",
-            "desc": "Mendukung kegiatan administrasi harian, pengarsipan dokumen resmi, dan penyusunan laporan periodik."
-        }
-    ],
-    "education": [
-        {
-            "degree": "S.Hum - Administrasi Negara",
-            "school": "Universitas Indonesia",
-            "year": "2014"
-        }
-    ]
-}
-
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1CtWwWaMNW8lhkAHsCUhSNHBZxGAWlTrqDABzRM4_wkk/export?format=csv&gid=0"
+# ── Config ──────────────────────────────────────────────────────────
+CENSUS_SHEET_URL = os.environ.get(
+    "CENSUS_SHEET_URL",
+    "https://docs.google.com/spreadsheets/d/1CtWwWaMNW8lhkAHsCUhSNHBZxGAWlTrqDABzRM4_wkk/export?format=csv&gid=0",
+)
+INVENTORY_SPREADSHEET_ID = os.environ.get("INVENTORY_SPREADSHEET_ID", "")
+INVENTORY_FOLDER_ID = os.environ.get("INVENTORY_FOLDER_ID", "1iEcdKlf41sAOZpjBPBa2KbFy4rWG129D")
 CSV_PATH = Path(__file__).parent / "databmnbuku.csv"
+GDRIVE_CREDS_JSON = os.environ.get("GDRIVE_CREDS_JSON", "")
+CREDS_PATH = Path(__file__).parent / "gdrive-creds.json"
 
+
+def _get_gdrive_creds():
+    """Load Google service account credentials from env or file."""
+    creds_json = GDRIVE_CREDS_JSON
+    if not creds_json and CREDS_PATH.exists():
+        creds_json = CREDS_PATH.read_text()
+    if not creds_json:
+        return None
+    return json.loads(creds_json)
+
+
+# ── CSV (databmnbuku.csv) ───────────────────────────────────────────
 _csv_cache = None
 
+
 def read_csv_local():
-    """Read databmnbuku.csv with caching"""
     global _csv_cache
     if _csv_cache is not None:
         return _csv_cache
@@ -66,40 +53,36 @@ def read_csv_local():
                 judul = merk if merk and merk != "-" else "Monografi"
                 kodifikasi = row.get("Kode1", "").strip()
                 if nup:
-                    items.append({
-                        "nup": nup,
-                        "judul": judul,
-                        "kodifikasi": kodifikasi
-                    })
+                    items.append({"nup": nup, "judul": judul, "kodifikasi": kodifikasi})
     except Exception as e:
         print(f"Error reading CSV: {e}")
     _csv_cache = items
     return items
 
+
+# ── Google Sheets (Census) ─────────────────────────────────────────
 _sheet_cache = None
 
+
 async def read_google_sheet():
-    """Read Google Sheet CSV with caching"""
     global _sheet_cache
     if _sheet_cache is not None:
         return _sheet_cache
     items = []
     try:
         async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-            resp = await client.get(GOOGLE_SHEET_URL)
+            resp = await client.get(CENSUS_SHEET_URL)
             resp.raise_for_status()
         reader = csv.DictReader(io.StringIO(resp.text))
         for row in reader:
             nup = row.get("NUP", "").strip()
             judul = row.get("Judul", "").strip()
-            catatan = row.get("Catatan", "").strip()
             status_val = row.get("Status", "").strip()
             if nup:
                 items.append({
                     "nup": nup,
                     "judul": judul,
-                    "catatan": catatan,
-                    "status_ditemukan": status_val == "Ditemukan"
+                    "status_ditemukan": status_val == "Ditemukan",
                 })
     except Exception as e:
         print(f"Error fetching Google Sheet: {e}")
@@ -107,8 +90,202 @@ async def read_google_sheet():
     _sheet_cache = items
     return items
 
+
+# ── Google Sheets API helper ────────────────────────────────────────
+def _get_sheets_service():
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+
+        creds_info = _get_gdrive_creds()
+        if not creds_info:
+            return None
+        creds = service_account.Credentials.from_service_account_info(
+            creds_info,
+            scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"],
+        )
+        return build("sheets", "v4", credentials=creds, cache_discovery=False)
+    except Exception as e:
+        print(f"Sheets API init failed: {e}")
+        return None
+
+
+def _get_drive_service():
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+
+        creds_info = _get_gdrive_creds()
+        if not creds_info:
+            return None
+        creds = service_account.Credentials.from_service_account_info(
+            creds_info,
+            scopes=["https://www.googleapis.com/auth/drive.readonly"],
+        )
+        return build("drive", "v3", credentials=creds, cache_discovery=False)
+    except Exception as e:
+        print(f"Drive API init failed: {e}")
+        return None
+
+
+# ── Inventory (Google Drive Excel) ─────────────────────────────────
+_inventory_cache = None
+_inventory_ts = 0
+CACHE_TTL = 300
+
+
+def _read_sheet_via_api(spreadsheet_id):
+    """Read spreadsheet via Google Sheets API."""
+    svc = _get_sheets_service()
+    if not svc:
+        return []
+    try:
+        meta = svc.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+        sheet_name = meta["sheets"][0]["properties"]["title"]
+        result = (
+            svc.spreadsheets()
+            .values()
+            .get(spreadsheetId=spreadsheet_id, range=f"'{sheet_name}'!A:Z")
+            .execute()
+        )
+        rows = result.get("values", [])
+        if len(rows) < 2:
+            return []
+        headers = [h.strip().lower() for h in rows[0]]
+        items = []
+        for row in rows[1:]:
+            vals = row + [""] * (len(headers) - len(row))
+            d = dict(zip(headers, vals))
+            nup = d.get("nup", "").strip()
+            judul = d.get("judul", "").strip()
+            catatan = d.get("catatan", "").strip()
+            status_val = d.get("status", "").strip()
+            if nup:
+                items.append({
+                    "nup": nup,
+                    "judul": judul,
+                    "catatan": catatan,
+                    "status_ditemukan": status_val == "Ditemukan",
+                })
+        return items
+    except Exception as e:
+        print(f"Sheets API read error: {e}")
+        return []
+
+
+def _find_latest_excel():
+    """Find latest Excel file in Google Drive folder."""
+    svc = _get_drive_service()
+    if not svc or not INVENTORY_FOLDER_ID:
+        return None
+    try:
+        q = f"'{INVENTORY_FOLDER_ID}' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false"
+        resp = svc.files().list(q=q, fields="files(id,name,modifiedTime)", orderBy="modifiedTime desc", pageSize=5).execute()
+        files = resp.get("files", [])
+        return files[0] if files else None
+    except Exception as e:
+        print(f"Drive search error: {e}")
+        return None
+
+
+def _download_excel(file_id):
+    """Download Excel file from Google Drive."""
+    svc = _get_drive_service()
+    if not svc:
+        return None
+    try:
+        resp = svc.files().get_media(fileId=file_id).execute()
+        tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+        tmp.write(resp)
+        tmp.close()
+        return tmp.name
+    except Exception as e:
+        print(f"Drive download error: {e}")
+        return None
+
+
+def _parse_excel_file(path):
+    """Parse Excel file with openpyxl."""
+    try:
+        import openpyxl
+
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        wb.close()
+        if len(rows) < 2:
+            return []
+        headers = [str(h).strip().lower() if h else "" for h in rows[0]]
+        nup_idx = None
+        status_idx = None
+        for i, h in enumerate(headers):
+            if h in ("nup", "kode", "kode barang", "no"):
+                if nup_idx is None:
+                    nup_idx = i
+            if "inventarisasi" in h or "status" == h:
+                if status_idx is None:
+                    status_idx = i
+        if nup_idx is None:
+            return []
+        items = []
+        for row in rows[1:]:
+            vals = list(row) + [None] * max(0, len(headers) - len(row))
+            nup_raw = vals[nup_idx]
+            nup = str(nup_raw).strip() if nup_raw is not None else ""
+            if not nup or nup.lower() in ("none", ""):
+                continue
+            status = ""
+            if status_idx is not None and status_idx < len(vals):
+                sv = vals[status_idx]
+                status = str(sv).strip() if sv is not None else ""
+            items.append({"nup": nup, "status": status})
+        return items
+    except ImportError:
+        print("openpyxl not installed")
+        return []
+    except Exception as e:
+        print(f"Excel parse error: {e}")
+        return []
+
+
+def read_inventory():
+    """Read inventory Excel with caching."""
+    global _inventory_cache, _inventory_ts
+    now = datetime.now().timestamp()
+    if _inventory_cache is not None and (now - _inventory_ts) < CACHE_TTL:
+        return _inventory_cache
+
+    # Try Google Sheets API first (if spreadsheet ID configured)
+    if INVENTORY_SPREADSHEET_ID:
+        items = _read_sheet_via_api(INVENTORY_SPREADSHEET_ID)
+        if items:
+            _inventory_cache = items
+            _inventory_ts = now
+            return items
+
+    # Try Google Drive (find + download + parse Excel)
+    file_info = _find_latest_excel()
+    if file_info:
+        print(f"Inventory file: {file_info.get('name', '?')}")
+        path = _download_excel(file_info["id"])
+        if path:
+            items = _parse_excel_file(path)
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            if items:
+                _inventory_cache = items
+                _inventory_ts = now
+                return items
+
+    _inventory_cache = []
+    _inventory_ts = now
+    return []
+
+
+# ── Helpers ─────────────────────────────────────────────────────────
 def get_kodifikasi_group(kodifikasi: str) -> str:
-    """Extract first letter of kodifikasi for grouping"""
     if not kodifikasi or kodifikasi == "-":
         return "Tanpa Kodifikasi"
     for char in kodifikasi:
@@ -116,65 +293,77 @@ def get_kodifikasi_group(kodifikasi: str) -> str:
             return char.upper()
     return "Lainnya"
 
-def compare_data(csv_items, sheet_items):
-    """Compare CSV with Google Sheet.
-    
-    Iterate from Sheet side to preserve all rows (including NUP duplicates).
-    Categories (based only on Status column in Sheet, ignoring Catatan):
-    1. belum_sensus              - CSV item not found in Sheet
-    2. sensus_ditemukan          - Sheet row with Status == 'Ditemukan'
-    3. sudah_ditemukan_belum_sensus - Sheet row with Status != 'Ditemukan'
+
+def compare_data(csv_items, sheet_items, inventory_items):
+    """Compare CSV, Census Sheet, and Inventory Excel.
+
+    Iterate from Census Sheet to preserve all rows.
+    Then check inventory to split 'Sensus, Belum Ditemukan'.
     """
-    # Build CSV lookup for kodifikasi and Merk
     csv_lookup = {}
-    for csv_item in csv_items:
-        csv_lookup[csv_item["nup"]] = csv_item
-    
+    for ci in csv_items:
+        csv_lookup[ci["nup"]] = ci
+
+    # NUP set from inventory (column E in Excel, Status Inventarisasi in column Y)
+    inventory_nups = set()
+    for inv in inventory_items:
+        nup = inv.get("nup", "").strip().lower()
+        if nup:
+            inventory_nups.add(nup)
+
     sensus_ditemukan = []
+    sensus_belum_ditemukan = []
     sudah_ditemukan_belum_sensus = []
     matched_nups = set()
-    
-    # Iterate over Sheet items (preserves duplicates)
-    for sheet_item in sheet_items:
-        nup = sheet_item["nup"]
-        judul_sheet = sheet_item["judul"]
-        csv_item = csv_lookup.get(nup, {})
-        kodifikasi = csv_item.get("kodifikasi", "")
-        judul_csv = csv_item.get("judul", "")
+
+    for si in sheet_items:
+        nup = si["nup"]
+        judul_sheet = si["judul"]
+        ci = csv_lookup.get(nup, {})
+        kodifikasi = ci.get("kodifikasi", "")
+        judul_csv = ci.get("judul", "")
         display_judul = judul_sheet if judul_sheet else judul_csv
         matched_nups.add(nup)
-        if sheet_item["status_ditemukan"]:
+
+        if si["status_ditemukan"]:
             sensus_ditemukan.append({
                 "nup": nup,
                 "judul": display_judul,
                 "kodifikasi": kodifikasi,
             })
         else:
-            sudah_ditemukan_belum_sensus.append({
-                "nup": nup,
-                "judul": display_judul,
-                "kodifikasi": kodifikasi,
-            })
-    
-    # CSV items not in Sheet = belum_sensus
+            # Check inventory for "Sensus, Belum Ditemukan"
+            if inventory_nups and nup.strip().lower() not in inventory_nups:
+                sensus_belum_ditemukan.append({
+                    "nup": nup,
+                    "judul": display_judul,
+                    "kodifikasi": kodifikasi,
+                })
+            else:
+                sudah_ditemukan_belum_sensus.append({
+                    "nup": nup,
+                    "judul": display_judul,
+                    "kodifikasi": kodifikasi,
+                })
+
     belum_sensus = []
-    for csv_item in csv_items:
-        if csv_item["nup"] not in matched_nups:
+    for ci in csv_items:
+        if ci["nup"] not in matched_nups:
             belum_sensus.append({
-                "nup": csv_item["nup"],
-                "judul": csv_item["judul"],
-                "kodifikasi": csv_item["kodifikasi"]
+                "nup": ci["nup"],
+                "judul": ci["judul"],
+                "kodifikasi": ci["kodifikasi"],
             })
-    
+
     return {
         "belum_sensus": belum_sensus,
         "sensus_ditemukan": sensus_ditemukan,
-        "sensus_belum_ditemukan": [],
-        "sudah_ditemukan_belum_sensus": sudah_ditemukan_belum_sensus
+        "sensus_belum_ditemukan": sensus_belum_ditemukan,
+        "sudah_ditemukan_belum_sensus": sudah_ditemukan_belum_sensus,
     }
 
+
 def group_by_kodifikasi(items):
-    """Group items by first letter of kodifikasi"""
     groups = defaultdict(list)
     for item in items:
         group = get_kodifikasi_group(item["kodifikasi"])
@@ -182,300 +371,99 @@ def group_by_kodifikasi(items):
     return dict(sorted(groups.items()))
 
 
-# ========== PROFILE PAGE ==========
-
-@app.get("/", response_class=HTMLResponse)
-async def profile():
-    skills_html = "".join(f'<span class="skill-tag">{s}</span>' for s in PROFILE["skills"])
-    
-    experience_html = "".join(f'''
-        <div class="timeline-item">
-            <div class="timeline-dot"></div>
-            <div class="timeline-content">
-                <h3>{e["role"]}</h3>
-                <p class="org">{e["org"]}</p>
-                <p class="period">{e["period"]}</p>
-                <p class="desc">{e["desc"]}</p>
-            </div>
-        </div>''' for e in PROFILE["experience"])
-
-    education_html = "".join(f'''
-        <div class="timeline-item">
-            <div class="timeline-dot"></div>
-            <div class="timeline-content">
-                <h3>{ed["degree"]}</h3>
-                <p class="org">{ed["school"]}</p>
-                <p class="period">Lulus {ed["year"]}</p>
-            </div>
-        </div>''' for ed in PROFILE["education"])
-
-    return f"""<!DOCTYPE html>
-<html lang="id">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{PROFILE["name"]} - Profile</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            font-family: 'Inter', sans-serif;
-            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-            color: #e0e0e0; min-height: 100vh;
-        }}
-        .nav {{ 
-            display: flex; justify-content: center; gap: 16px; 
-            padding: 20px; background: rgba(0,0,0,0.3);
-            position: sticky; top: 0; z-index: 100;
-            backdrop-filter: blur(10px);
-        }}
-        .nav a {{
-            padding: 10px 24px; border-radius: 10px;
-            text-decoration: none; color: #a78bfa; font-weight: 500;
-            transition: all 0.3s;
-        }}
-        .nav a:hover, .nav a.active {{ background: rgba(167, 139, 250, 0.2); color: #fff; }}
-        .container {{ max-width: 800px; margin: 0 auto; padding: 40px 20px; }}
-        .profile-card {{
-            background: rgba(255,255,255,0.05);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 20px;
-            padding: 40px; margin-bottom: 30px; text-align: center;
-        }}
-        .avatar {{
-            width: 120px; height: 120px; border-radius: 50%;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            display: flex; align-items: center; justify-content: center;
-            margin: 0 auto 20px; font-size: 48px; font-weight: 700; color: white;
-        }}
-        .name {{ font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 8px; }}
-        .title {{ font-size: 16px; color: #a78bfa; font-weight: 500; margin-bottom: 16px; }}
-        .bio {{ font-size: 14px; color: #9ca3af; line-height: 1.7; max-width: 600px; margin: 0 auto; }}
-        .contact-link {{
-            display: inline-flex; align-items: center; gap: 8px;
-            margin-top: 20px; padding: 10px 20px;
-            background: rgba(167, 139, 250, 0.15);
-            border: 1px solid rgba(167, 139, 250, 0.3);
-            border-radius: 10px; color: #a78bfa;
-            text-decoration: none; font-size: 14px; font-weight: 500;
-            transition: all 0.3s;
-        }}
-        .contact-link:hover {{ background: rgba(167, 139, 250, 0.25); }}
-        .section {{
-            background: rgba(255,255,255,0.05);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 20px; padding: 30px 40px; margin-bottom: 30px;
-        }}
-        .section-title {{
-            font-size: 20px; font-weight: 600; color: #fff;
-            margin-bottom: 20px; display: flex; align-items: center; gap: 10px;
-        }}
-        .skills-grid {{ display: flex; flex-wrap: wrap; gap: 10px; }}
-        .skill-tag {{
-            padding: 8px 16px;
-            background: rgba(167, 139, 250, 0.12);
-            border: 1px solid rgba(167, 139, 250, 0.25);
-            border-radius: 20px; font-size: 13px; font-weight: 500; color: #c4b5fd;
-        }}
-        .timeline {{ position: relative; padding-left: 30px; }}
-        .timeline::before {{
-            content: ''; position: absolute; left: 8px; top: 0;
-            width: 2px; height: 100%; background: rgba(167, 139, 250, 0.3);
-        }}
-        .timeline-item {{ position: relative; margin-bottom: 24px; }}
-        .timeline-item:last-child {{ margin-bottom: 0; }}
-        .timeline-dot {{
-            position: absolute; left: -26px; top: 6px;
-            width: 12px; height: 12px; border-radius: 50%;
-            background: #a78bfa; border: 2px solid #302b63;
-        }}
-        .timeline-content h3 {{ font-size: 16px; font-weight: 600; color: #fff; }}
-        .timeline-content .org {{ font-size: 14px; color: #a78bfa; margin: 4px 0; }}
-        .timeline-content .period {{ font-size: 12px; color: #6b7280; margin-bottom: 6px; }}
-        .timeline-content .desc {{ font-size: 13px; color: #9ca3af; line-height: 1.6; }}
-        .footer {{ text-align: center; padding: 20px; font-size: 12px; color: #4b5563; }}
-        @media (max-width: 600px) {{
-            .profile-card, .section {{ padding: 24px 20px; }}
-            .name {{ font-size: 22px; }}
-        }}
-    </style>
-</head>
-<body>
-    <div class="nav">
-        <a href="/" class="active">👤 Profil</a>
-        <a href="/sensus">📊 Sensus BMN</a>
-    </div>
-    <div class="container">
-        <div class="profile-card">
-            <div class="avatar">{PROFILE["name"][0]}</div>
-            <div class="name">{PROFILE["name"]}</div>
-            <div class="title">{PROFILE["title"]}</div>
-            <div class="bio">{PROFILE["bio"]}</div>
-            <a href="mailto:{PROFILE["email"]}" class="contact-link">
-                ✉️ {PROFILE["email"]}
-            </a>
-        </div>
-        <div class="section">
-            <div class="section-title">💡 Keahlian</div>
-            <div class="skills-grid">{skills_html}</div>
-        </div>
-        <div class="section">
-            <div class="section-title">💼 Pengalaman Kerja</div>
-            <div class="timeline">{experience_html}</div>
-        </div>
-        <div class="section">
-            <div class="section-title">🎓 Pendidikan</div>
-            <div class="timeline">{education_html}</div>
-        </div>
-        <div class="footer">
-            Built with FastAPI &amp; deployed on Vercel 🚀
-        </div>
-    </div>
-</body>
-</html>"""
-
-
-# ========== SENSUS PAGE (Client-Side Rendering) ==========
-
+# ── HTML Template ───────────────────────────────────────────────────
 SENsus_HTML = """<!DOCTYPE html>
-<html lang="id">
+<html lang="id" class="scroll-smooth">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sensus BMN - PLUVIO</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+                    colors: {
+                        dark: { 900: '#0a0a1a', 800: '#111127', 700: '#1a1a3e' },
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Inter', sans-serif;
-            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-            color: #e0e0e0; min-height: 100vh;
-        }
-        .nav {
-            display: flex; justify-content: center; gap: 16px;
-            padding: 20px; background: rgba(0,0,0,0.3);
-            position: sticky; top: 0; z-index: 100;
-            backdrop-filter: blur(10px);
-        }
-        .nav a {
-            padding: 10px 24px; border-radius: 10px;
-            text-decoration: none; color: #a78bfa; font-weight: 500;
-            transition: all 0.3s;
-        }
-        .nav a:hover, .nav a.active { background: rgba(167, 139, 250, 0.2); color: #fff; }
-        .container { max-width: 1000px; margin: 0 auto; padding: 40px 20px; }
-        h1 { text-align: center; font-size: 28px; color: #fff; margin-bottom: 10px; }
-        .subtitle { text-align: center; color: #9ca3af; margin-bottom: 30px; font-size: 14px; }
-        .loading { text-align: center; padding: 60px; color: #a78bfa; font-size: 16px; }
-        .loading .spinner {
-            width: 40px; height: 40px; border: 3px solid rgba(167,139,250,0.2);
-            border-top-color: #a78bfa; border-radius: 50%;
-            animation: spin 1s linear infinite; margin: 0 auto 16px;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .stats {
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-            gap: 16px; margin-bottom: 30px;
-        }
-        .stat-card {
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 14px; padding: 20px; text-align: center;
-            transition: all 0.2s;
-        }
-        .stat-card.clickable { cursor: pointer; }
-        .stat-card.clickable:hover { background: rgba(255,255,255,0.1); transform: translateY(-2px); border-color: rgba(167,139,250,0.4); }
-        .stat-card .num { font-size: 32px; font-weight: 700; }
-        .stat-card .label { font-size: 12px; color: #9ca3af; margin-top: 4px; }
-        .category {
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 20px; padding: 24px; margin-bottom: 24px;
-        }
-        .category-header {
-            display: flex; align-items: center; justify-content: space-between;
-            cursor: pointer; padding: 10px 0;
-        }
-        .category-title {
-            font-size: 18px; font-weight: 600; color: #fff;
-            display: flex; align-items: center; gap: 10px;
-        }
-        .category-badge {
-            padding: 4px 12px; border-radius: 20px;
-            font-size: 13px; font-weight: 600;
-        }
-        .badge-green { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
-        .badge-yellow { background: rgba(250, 204, 21, 0.2); color: #facc15; }
-        .badge-orange { background: rgba(251, 146, 60, 0.2); color: #fb923c; }
-        .badge-red { background: rgba(248, 113, 113, 0.2); color: #f87171; }
-        .kodif-group { margin-bottom: 16px; }
-        .kodif-header {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 10px 14px;
-            background: rgba(255,255,255,0.04);
-            border-radius: 10px; cursor: pointer;
-            transition: background 0.2s;
-        }
-        .kodif-header:hover { background: rgba(255,255,255,0.08); }
-        .kodif-label { font-weight: 600; font-size: 14px; color: #c4b5fd; }
-        .kodif-count {
-            font-size: 12px; color: #6b7280;
-            background: rgba(255,255,255,0.08);
-            padding: 2px 10px; border-radius: 12px;
-        }
-        .kodif-list { margin-top: 8px; overflow-x: auto; }
-        .kodif-list table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .kodif-list th {
-            text-align: left; padding: 8px 12px;
-            color: #9ca3af; border-bottom: 1px solid rgba(255,255,255,0.1);
-            font-weight: 500; font-size: 12px;
-        }
-        .kodif-list td {
-            padding: 8px 12px;
-            border-bottom: 1px solid rgba(255,255,255,0.04);
-            color: #d1d5db;
-        }
-        .kodif-list td.nup { color: #a78bfa; font-weight: 600; white-space: nowrap; }
-        .kodif-list td.kodif { color: #60a5fa; font-size: 12px; white-space: nowrap; }
-        .kodif-group.collapsed .kodif-list { display: none; }
-        .search-box {
-            width: 100%; padding: 12px 20px; border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.15);
-            background: rgba(255,255,255,0.05); color: #fff;
-            font-size: 14px; margin-bottom: 24px; outline: none;
-            font-family: 'Inter', sans-serif;
-        }
-        .search-box::placeholder { color: #6b7280; }
-        .search-box:focus { border-color: rgba(167, 139, 250, 0.5); }
-        .footer { text-align: center; padding: 20px; font-size: 12px; color: #4b5563; }
-        .error { text-align: center; padding: 40px; color: #f87171; }
-        @media (max-width: 600px) {
-            .stats { grid-template-columns: 1fr 1fr; }
-            .category { padding: 16px; }
-        }
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.06); }
+        .glass-hover:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); }
+        .gradient-border { position: relative; }
+        .gradient-border::before { content: ''; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; background: linear-gradient(135deg, rgba(99,102,241,0.3), rgba(168,85,247,0.3), rgba(236,72,153,0.3)); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
+        .gradient-border:hover::before { opacity: 1; }
+        .shimmer { background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%); background-size: 200% 100%; animation: shimmer 2s infinite; }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-up { animation: fadeUp 0.5s ease-out forwards; }
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
     </style>
 </head>
-<body>
-    <div class="nav">
-        <a href="/">👤 Profil</a>
-        <a href="/sensus" class="active">📊 Sensus BMN</a>
-    </div>
-    <div class="container">
-        <h1>📊 Sensus BMN</h1>
-        <p class="subtitle">Perbandingan data CSV (databmnbuku.csv) dengan Google Sheet sensus</p>
-        <div id="stats"></div>
-        <div id="content">
-            <div class="loading">
-                <div class="spinner"></div>
-                Memuat data sensus...
+<body class="bg-dark-900 text-gray-200 min-h-screen">
+
+    <!-- Header -->
+    <header class="sticky top-0 z-50 glass border-b border-white/5">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-indigo-500/20">P</div>
+                <div>
+                    <h1 class="text-lg font-bold text-white tracking-tight">PLUVIO</h1>
+                    <p class="text-[11px] text-gray-500 font-medium tracking-wide uppercase">Sensus BMN Dashboard</p>
+                </div>
+            </div>
+            <div id="lastUpdated" class="text-xs text-gray-600 hidden sm:block"></div>
+        </div>
+    </header>
+
+    <!-- Main -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        <!-- Title -->
+        <div class="text-center mb-10 fade-up">
+            <h2 class="text-3xl sm:text-4xl font-extrabold text-white mb-3 tracking-tight">
+                Sensus <span class="bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">BMN</span>
+            </h2>
+            <p class="text-gray-500 text-sm max-w-lg mx-auto">Perbandingan data <span class="text-gray-400">databmnbuku.csv</span> dengan Google Sheet sensus & inventarisasi</p>
+        </div>
+
+        <!-- Stats -->
+        <div id="stats" class="mb-10"></div>
+
+        <!-- Search -->
+        <div id="searchWrap" class="mb-8 hidden">
+            <div class="relative max-w-xl mx-auto">
+                <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                <input type="text" id="searchInput" class="w-full pl-12 pr-4 py-3.5 rounded-2xl glass text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all" placeholder="Cari NUP atau Judul buku...">
+                <span id="searchCount" class="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-gray-600 hidden"></span>
             </div>
         </div>
-        <div class="footer">Built with FastAPI &amp; deployed on Vercel 🚀</div>
-    </div>
+
+        <!-- Content -->
+        <div id="content">
+            <div class="flex flex-col items-center justify-center py-24">
+                <div class="w-12 h-12 border-3 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mb-4"></div>
+                <p class="text-gray-500 text-sm">Memuat data sensus...</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="text-center py-8 text-xs text-gray-700">
+        Built with FastAPI & deployed on Vercel
+    </footer>
+
     <script>
+        // ── Helpers ──
         function getGroup(k) {
             if (!k || k === '-') return 'Tanpa Kodifikasi';
             for (let c of k) { if (/[a-zA-Z]/.test(c)) return c.toUpperCase(); }
@@ -488,25 +476,40 @@ SENsus_HTML = """<!DOCTYPE html>
                 if (!g[key]) g[key] = [];
                 g[key].push(item);
             });
-            return Object.keys(g).sort().map(k => ({name: k, items: g[k]}));
+            return Object.keys(g).sort().map(k => ({ name: k, items: g[k] }));
         }
-        function renderGroups(groups) {
-            if (groups.length === 0) return '<p style="color:#6b7280;padding:10px;">Tidak ada data</p>';
-            return groups.map(g => `
-                <div class="kodif-group collapsed">
-                    <div class="kodif-header" onclick="this.parentElement.classList.toggle('collapsed')">
-                        <span class="kodif-label">📁 ${g.name}</span>
-                        <span class="kodif-count">${g.items.length} item</span>
-                    </div>
-                    <div class="kodif-list">
-                        <table>
-                            <thead><tr><th>No</th><th>NUP</th><th>Judul</th><th>Kodifikasi</th></tr></thead>
+        function escapeHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        // ── Renderers ──
+        function renderGroups(groups, catId) {
+            if (groups.length === 0) return '<p class="text-gray-600 text-sm py-4 text-center">Tidak ada data</p>';
+            return groups.map((g, gi) => `
+                <div class="mb-3" data-group="${catId}-${g.name}">
+                    <button onclick="toggleGroup(this)" class="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] transition-all text-left group">
+                        <div class="flex items-center gap-3">
+                            <svg class="w-4 h-4 text-gray-500 group-hover:text-indigo-400 transition-transform chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            <span class="text-sm font-semibold text-indigo-300/80">${escapeHtml(g.name)}</span>
+                        </div>
+                        <span class="text-xs text-gray-600 bg-white/5 px-2.5 py-1 rounded-full">${g.items.length} item</span>
+                    </button>
+                    <div class="hidden mt-2 ml-4 overflow-x-auto scrollbar-thin">
+                        <table class="w-full text-sm">
+                            <thead><tr class="text-left text-[11px] text-gray-600 uppercase tracking-wider">
+                                <th class="pb-2 pl-4 w-12">#</th>
+                                <th class="pb-2 w-28">NUP</th>
+                                <th class="pb-2">Judul</th>
+                                <th class="pb-2 w-24">Kodifikasi</th>
+                            </tr></thead>
                             <tbody>${g.items.map((item, i) => `
-                                <tr>
-                                    <td>${i+1}</td>
-                                    <td class="nup">${item.nup}</td>
-                                    <td>${item.judul.length > 60 ? item.judul.substring(0,60)+'...' : item.judul}</td>
-                                    <td class="kodif">${item.kodifikasi}</td>
+                                <tr class="border-t border-white/[0.03] hover:bg-white/[0.02]">
+                                    <td class="py-2 pl-4 text-gray-600 text-xs">${i + 1}</td>
+                                    <td class="py-2 font-mono text-indigo-400/80 font-semibold text-xs whitespace-nowrap">${escapeHtml(item.nup)}</td>
+                                    <td class="py-2 pr-4 text-gray-300 text-xs">${escapeHtml(item.judul.length > 65 ? item.judul.substring(0, 65) + '…' : item.judul)}</td>
+                                    <td class="py-2 text-blue-400/60 text-xs font-mono whitespace-nowrap">${escapeHtml(item.kodifikasi)}</td>
                                 </tr>`).join('')}
                             </tbody>
                         </table>
@@ -514,58 +517,133 @@ SENsus_HTML = """<!DOCTYPE html>
                 </div>
             `).join('');
         }
-        function renderCategory(icon, badgeClass, title, count, groups) {
+
+        function toggleGroup(btn) {
+            const content = btn.nextElementSibling;
+            const chevron = btn.querySelector('.chevron');
+            content.classList.toggle('hidden');
+            chevron.style.transform = content.classList.contains('hidden') ? '' : 'rotate(90deg)';
+        }
+
+        function toggleCategory(catId) {
+            const body = document.getElementById(catId + '-body');
+            const chevron = document.querySelector(`[onclick="toggleCategory('${catId}')"] .chevron`);
+            body.classList.toggle('hidden');
+            if (chevron) chevron.style.transform = body.classList.contains('hidden') ? '' : 'rotate(90deg)';
+        }
+
+        function scrollToSection(id) {
+            document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        // ── Search ──
+        let allData = {};
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('searchInput')?.addEventListener('input', function() {
+                const q = this.value.toLowerCase().trim();
+                const countEl = document.getElementById('searchCount');
+                let total = 0;
+                document.querySelectorAll('tbody tr').forEach(row => {
+                    const match = !q || row.textContent.toLowerCase().includes(q);
+                    row.style.display = match ? '' : 'none';
+                    if (match) total++;
+                });
+                if (q) {
+                    // Expand collapsed groups
+                    document.querySelectorAll('#content .hidden').forEach(el => {
+                        if (el.tagName !== 'INPUT') el.classList.remove('hidden');
+                    });
+                    document.querySelectorAll('.chevron').forEach(c => c.style.transform = 'rotate(90deg)');
+                    countEl.textContent = total + ' hasil';
+                    countEl.classList.remove('hidden');
+                } else {
+                    countEl.classList.add('hidden');
+                }
+            });
+        });
+
+        // ── Stat Card HTML ──
+        function statCard(id, icon, color, count, label, delay) {
             return `
-                <div class="category">
-                    <div class="category-header" onclick="this.parentElement.querySelector('.category-body').style.display = this.parentElement.querySelector('.category-body').style.display === 'none' ? 'block' : 'none'">
-                        <div class="category-title">
-                            <span class="category-badge ${badgeClass}">${icon}</span>
-                            ${title}
-                            <span class="category-badge ${badgeClass}">${count}</span>
-                        </div>
-                    </div>
-                    <div class="category-body">${renderGroups(groups)}</div>
+                <button onclick="scrollToSection('${id}')" class="glass glass-hover gradient-border rounded-2xl p-5 text-center transition-all duration-300 hover:scale-[1.02] hover:-translate-y-1 fade-up" style="animation-delay:${delay}ms">
+                    <div class="text-3xl sm:text-4xl font-extrabold mb-1" style="color:${color}">${count.toLocaleString()}</div>
+                    <div class="text-[11px] text-gray-500 font-medium uppercase tracking-wider">${icon} ${label}</div>
+                </button>`;
+        }
+
+        function statCardTotal(count, delay) {
+            return `
+                <div class="glass rounded-2xl p-5 text-center fade-up" style="animation-delay:${delay}ms">
+                    <div class="text-3xl sm:text-4xl font-extrabold mb-1 bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">${count.toLocaleString()}</div>
+                    <div class="text-[11px] text-gray-500 font-medium uppercase tracking-wider">📊 Total Data</div>
                 </div>`;
         }
-        function filterAll(q) {
-            q = q.toLowerCase();
-            document.querySelectorAll('.kodif-list tr').forEach(row => {
-                if (row.parentElement.tagName === 'THEAD') return;
-                row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
-            });
-            if (q.length > 0) {
-                document.querySelectorAll('.kodif-group.collapsed').forEach(g => g.classList.remove('collapsed'));
-                document.querySelectorAll('.category-body').forEach(b => b.style.display = 'block');
-            }
+
+        function categoryHTML(catId, icon, colorClass, title, count, groups, delay) {
+            return `
+                <div class="glass rounded-2xl overflow-hidden mb-6 fade-up" style="animation-delay:${delay}ms" id="sec-${catId}">
+                    <button onclick="toggleCategory('${catId}')" class="w-full flex items-center justify-between px-6 py-5 hover:bg-white/[0.02] transition-colors text-left">
+                        <div class="flex items-center gap-4">
+                            <span class="text-2xl">${icon}</span>
+                            <div>
+                                <h3 class="text-base font-bold text-white">${title}</h3>
+                                <p class="text-xs text-gray-500 mt-0.5">${count.toLocaleString()} item</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="text-xs font-bold px-3 py-1.5 rounded-full ${colorClass}">${count.toLocaleString()}</span>
+                            <svg class="w-5 h-5 text-gray-500 chevron transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                        </div>
+                    </button>
+                    <div id="${catId}-body" class="hidden px-6 pb-6">
+                        ${renderGroups(groups, catId)}
+                    </div>
+                </div>`;
         }
-        function scrollToSection(id) {
-            document.getElementById(id).scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
+
+        // ── Load Data ──
         async function loadData() {
             try {
                 const resp = await fetch('/api/sensus');
-                if (!resp.ok) throw new Error('API error');
+                if (!resp.ok) throw new Error('API error: ' + resp.status);
                 const data = await resp.json();
+                allData = data;
+
+                const bs = data.belum_sensus || [];
                 const sd = data.sensus_ditemukan || [];
                 const sbd = data.sensus_belum_ditemukan || [];
                 const ds = data.sudah_ditemukan_belum_sensus || [];
-                const bs = data.belum_sensus || [];
+                const total = bs.length + sd.length + sbd.length + ds.length;
+
                 document.getElementById('stats').innerHTML = `
-                    <div class="stats">
-                        <div class="stat-card clickable" onclick="scrollToSection('sec-bs')"><div class="num" style="color:#f87171">${bs.length}</div><div class="label">❌ Belum di Google Sheet</div></div>
-                        <div class="stat-card clickable" onclick="scrollToSection('sec-sd')"><div class="num" style="color:#4ade80">${sd.length}</div><div class="label">✅ Sensus & Ditemukan</div></div>
-                        <div class="stat-card clickable" onclick="scrollToSection('sec-sbd')"><div class="num" style="color:#facc15">${sbd.length}</div><div class="label">⚠️ Sensus, Belum Ditemukan</div></div>
-                        <div class="stat-card clickable" onclick="scrollToSection('sec-ds')"><div class="num" style="color:#fb923c">${ds.length}</div><div class="label">📋 Ditemukan tapi Belum Sensus</div></div>
-                        <div class="stat-card"><div class="num" style="color:#60a5fa">${sd.length+sbd.length+ds.length+bs.length}</div><div class="label">📊 Total Data</div></div>
-                    </div>
-                    <input type="text" class="search-box" placeholder="🔍 Cari NUP atau Judul..." oninput="filterAll(this.value)">
-                    <div id="sec-bs">${renderCategory('❌','badge-red','Belum di Google Sheet',bs.length,groupByKodifikasi(bs))}</div>
-                    <div id="sec-sd">${renderCategory('✅','badge-green','Sensus & Ditemukan',sd.length,groupByKodifikasi(sd))}</div>
-                    <div id="sec-sbd">${renderCategory('⚠️','badge-yellow','Sensus, Belum Ditemukan',sbd.length,groupByKodifikasi(sbd))}</div>
-                    <div id="sec-ds">${renderCategory('📋','badge-orange','Ditemukan tapi Belum Sensus',ds.length,groupByKodifikasi(ds))}</div>
-                `;
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+                        ${statCard('sec-bs', '❌', '#f87171', bs.length, 'Belum di Sheet', 0)}
+                        ${statCard('sec-sbd', '⚠️', '#facc15', sbd.length, 'Sensus, Belum Ditemukan', 80)}
+                        ${statCard('sec-ds', '📋', '#fb923c', ds.length, 'Ditemukan, Belum Sensus', 160)}
+                        ${statCard('sec-sd', '✅', '#4ade80', sd.length, 'Sensus & Ditemukan', 240)}
+                        ${statCardTotal(total, 320)}
+                    </div>`;
+
+                document.getElementById('searchWrap').classList.remove('hidden');
+
+                document.getElementById('content').innerHTML =
+                    categoryHTML('bs', '❌', 'bg-red-500/15 text-red-400', 'Belum di Google Sheet', bs.length, groupByKodifikasi(bs), 400) +
+                    categoryHTML('sbd', '⚠️', 'bg-yellow-500/15 text-yellow-400', 'Sensus, Belum Ditemukan', sbd.length, groupByKodifikasi(sbd), 480) +
+                    categoryHTML('ds', '📋', 'bg-orange-500/15 text-orange-400', 'Ditemukan, Belum Sensus', ds.length, groupByKodifikasi(ds), 560) +
+                    categoryHTML('sd', '✅', 'bg-emerald-500/15 text-emerald-400', 'Sensus & Ditemukan', sd.length, groupByKodifikasi(sd), 640);
+
+                // Show last updated
+                const now = new Date();
+                document.getElementById('lastUpdated').textContent = 'Updated: ' + now.toLocaleString('id-ID');
+
             } catch(e) {
-                document.getElementById('content').innerHTML = `<div class="error">❌ Gagal memuat data: ${e.message}</div>`;
+                document.getElementById('content').innerHTML = `
+                    <div class="text-center py-16">
+                        <div class="text-4xl mb-4">❌</div>
+                        <p class="text-red-400 font-medium">Gagal memuat data</p>
+                        <p class="text-gray-600 text-sm mt-2">${escapeHtml(e.message)}</p>
+                        <button onclick="loadData()" class="mt-4 px-6 py-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 text-sm font-medium hover:bg-indigo-500/30 transition-colors">Coba Lagi</button>
+                    </div>`;
             }
         }
         loadData();
@@ -573,19 +651,26 @@ SENsus_HTML = """<!DOCTYPE html>
 </body>
 </html>"""
 
+
+# ── Routes ──────────────────────────────────────────────────────────
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    return SENsus_HTML
+
+
 @app.get("/sensus", response_class=HTMLResponse)
 async def sensus_page():
     return SENsus_HTML
 
 
-# ========== API ==========
-
-@app.get("/api/profile")
-async def get_profile():
-    return PROFILE
-
 @app.get("/api/sensus")
 async def get_sensus_data():
     csv_items = read_csv_local()
     sheet_items = await read_google_sheet()
-    return compare_data(csv_items, sheet_items)
+    inventory_items = read_inventory()
+    return compare_data(csv_items, sheet_items, inventory_items)
+
+
+@app.get("/api/profile")
+async def get_profile():
+    return {"name": "PLUVIO", "description": "Sensus BMN Dashboard"}
