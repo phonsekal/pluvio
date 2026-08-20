@@ -47,7 +47,6 @@ PROFILE = {
 }
 
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1CtWwWaMNW8lhkAHsCUhSNHBZxGAWlTrqDABzRM4_wkk/export?format=csv&gid=0"
-
 CSV_PATH = Path(__file__).parent / "databmnbuku.csv"
 
 _csv_cache = None
@@ -111,7 +110,6 @@ def get_kodifikasi_group(kodifikasi: str) -> str:
     """Extract first letter of kodifikasi for grouping"""
     if not kodifikasi or kodifikasi == "-":
         return "Tanpa Kodifikasi"
-    # Get first character that is a letter
     for char in kodifikasi:
         if char.isalpha():
             return char.upper()
@@ -119,7 +117,6 @@ def get_kodifikasi_group(kodifikasi: str) -> str:
 
 def compare_data(csv_items, sheet_items):
     """Compare CSV with Google Sheet"""
-    # Build lookup from Google Sheet
     sheet_lookup = {}
     for item in sheet_items:
         sheet_lookup[item["nup"]] = item
@@ -129,12 +126,8 @@ def compare_data(csv_items, sheet_items):
     di_sheet_tanpa_sensus = []
     belum_sensus = []
     
-    csv_nups = set()
-    
     for csv_item in csv_items:
         nup = csv_item["nup"]
-        csv_nups.add(nup)
-        
         if nup in sheet_lookup:
             sheet_item = sheet_lookup[nup]
             if sheet_item["catatan"] == "sensus" and sheet_item["status_ditemukan"]:
@@ -152,7 +145,6 @@ def compare_data(csv_items, sheet_items):
                     "judul_sheet": sheet_item["judul"]
                 })
             else:
-                # In sheet but no sensus status
                 di_sheet_tanpa_sensus.append({
                     "nup": nup,
                     "judul": csv_item["judul"],
@@ -222,8 +214,7 @@ async def profile():
         body {{
             font-family: 'Inter', sans-serif;
             background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-            color: #e0e0e0;
-            min-height: 100vh;
+            color: #e0e0e0; min-height: 100vh;
         }}
         .nav {{ 
             display: flex; justify-content: center; gap: 16px; 
@@ -339,60 +330,9 @@ async def profile():
 </html>"""
 
 
-# ========== SENSUS PAGE ==========
+# ========== SENSUS PAGE (Client-Side Rendering) ==========
 
-@app.get("/sensus", response_class=HTMLResponse)
-async def sensus_page():
-    csv_items = read_csv_local()
-    sheet_items = await read_google_sheet()
-    result = compare_data(csv_items, sheet_items)
-    
-    sensus_ditemukan = result["sensus_ditemukan"]
-    sensus_belum_ditemukan = result["sensus_belum_ditemukan"]
-    di_sheet_tanpa_sensus = result["di_sheet_tanpa_sensus"]
-    belum_sensus = result["belum_sensus"]
-    
-    # Group each category by kodifikasi
-    gd = group_by_kodifikasi(sensus_ditemukan)
-    gbd = group_by_kodifikasi(sensus_belum_ditemukan)
-    gds = group_by_kodifikasi(di_sheet_tanpa_sensus)
-    gbs = group_by_kodifikasi(belum_sensus)
-    
-    def render_group(data, group_dict, color_class):
-        html_parts = []
-        for group_name, items in group_dict.items():
-            group_id = f"{color_class}-{group_name}".replace(" ", "-")
-            html_parts.append(f'''
-                <div class="kodif-group collapsed">
-                    <div class="kodif-header" onclick="toggleGroup(this)">
-                        <span class="kodif-label">📁 {group_name}</span>
-                        <span class="kodif-count">{len(items)} item</span>
-                    </div>
-                    <div class="kodif-list">
-                        <table>
-                            <thead><tr><th>No</th><th>NUP</th><th>Judul</th><th>Kodifikasi</th></tr></thead>
-                            <tbody>''')
-            for i, item in enumerate(items, 1):
-                html_parts.append(f'''
-                                <tr>
-                                    <td>{i}</td>
-                                    <td class="nup">{item["nup"]}</td>
-                                    <td>{item["judul"][:60]}{"..." if len(item["judul"]) > 60 else ""}</td>
-                                    <td class="kodif">{item["kodifikasi"]}</td>
-                                </tr>''')
-            html_parts.append('''
-                            </tbody>
-                        </table>
-                    </div>
-                </div>''')
-        return "\n".join(html_parts)
-    
-    sensus_ditemukan_html = render_group(sensus_ditemukan, gd, "green")
-    sensus_belum_ditemukan_html = render_group(sensus_belum_ditemukan, gbd, "yellow")
-    di_sheet_tanpa_sensus_html = render_group(di_sheet_tanpa_sensus, gds, "orange")
-    belum_sensus_html = render_group(belum_sensus, gbs, "red")
-
-    return f"""<!DOCTYPE html>
+SENsus_HTML = """<!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
@@ -400,115 +340,111 @@ async def sensus_page():
     <title>Sensus BMN - PLUVIO</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
             font-family: 'Inter', sans-serif;
             background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
             color: #e0e0e0; min-height: 100vh;
-        }}
-        .nav {{
+        }
+        .nav {
             display: flex; justify-content: center; gap: 16px;
             padding: 20px; background: rgba(0,0,0,0.3);
             position: sticky; top: 0; z-index: 100;
             backdrop-filter: blur(10px);
-        }}
-        .nav a {{
+        }
+        .nav a {
             padding: 10px 24px; border-radius: 10px;
             text-decoration: none; color: #a78bfa; font-weight: 500;
             transition: all 0.3s;
-        }}
-        .nav a:hover, .nav a.active {{ background: rgba(167, 139, 250, 0.2); color: #fff; }}
-        .container {{ max-width: 1000px; margin: 0 auto; padding: 40px 20px; }}
-        h1 {{ text-align: center; font-size: 28px; color: #fff; margin-bottom: 10px; }}
-        .subtitle {{ text-align: center; color: #9ca3af; margin-bottom: 30px; font-size: 14px; }}
-        
-        .stats {{
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        }
+        .nav a:hover, .nav a.active { background: rgba(167, 139, 250, 0.2); color: #fff; }
+        .container { max-width: 1000px; margin: 0 auto; padding: 40px 20px; }
+        h1 { text-align: center; font-size: 28px; color: #fff; margin-bottom: 10px; }
+        .subtitle { text-align: center; color: #9ca3af; margin-bottom: 30px; font-size: 14px; }
+        .loading { text-align: center; padding: 60px; color: #a78bfa; font-size: 16px; }
+        .loading .spinner {
+            width: 40px; height: 40px; border: 3px solid rgba(167,139,250,0.2);
+            border-top-color: #a78bfa; border-radius: 50%;
+            animation: spin 1s linear infinite; margin: 0 auto 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .stats {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
             gap: 16px; margin-bottom: 30px;
-        }}
-        .stat-card {{
+        }
+        .stat-card {
             background: rgba(255,255,255,0.05);
             border: 1px solid rgba(255,255,255,0.1);
             border-radius: 14px; padding: 20px; text-align: center;
-        }}
-        .stat-card .num {{ font-size: 32px; font-weight: 700; }}
-        .stat-card .label {{ font-size: 12px; color: #9ca3af; margin-top: 4px; }}
-        .stat-card.green .num {{ color: #4ade80; }}
-        .stat-card.yellow .num {{ color: #facc15; }}
-        .stat-card.red .num {{ color: #f87171; }}
-        .stat-card.blue .num {{ color: #60a5fa; }}
-        
-        .category {{
+        }
+        .stat-card .num { font-size: 32px; font-weight: 700; }
+        .stat-card .label { font-size: 12px; color: #9ca3af; margin-top: 4px; }
+        .category {
             background: rgba(255,255,255,0.05);
             border: 1px solid rgba(255,255,255,0.1);
             border-radius: 20px; padding: 24px; margin-bottom: 24px;
-        }}
-        .category-header {{
+        }
+        .category-header {
             display: flex; align-items: center; justify-content: space-between;
             cursor: pointer; padding: 10px 0;
-        }}
-        .category-title {{
+        }
+        .category-title {
             font-size: 18px; font-weight: 600; color: #fff;
             display: flex; align-items: center; gap: 10px;
-        }}
-        .category-badge {{
+        }
+        .category-badge {
             padding: 4px 12px; border-radius: 20px;
             font-size: 13px; font-weight: 600;
-        }}
-        .badge-green {{ background: rgba(74, 222, 128, 0.2); color: #4ade80; }}
-        .badge-yellow {{ background: rgba(250, 204, 21, 0.2); color: #facc15; }}
-        .badge-orange {{ background: rgba(251, 146, 60, 0.2); color: #fb923c; }}
-        .badge-red {{ background: rgba(248, 113, 113, 0.2); color: #f87171; }}
-        
-        .kodif-group {{ margin-bottom: 16px; }}
-        .kodif-header {{
+        }
+        .badge-green { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+        .badge-yellow { background: rgba(250, 204, 21, 0.2); color: #facc15; }
+        .badge-orange { background: rgba(251, 146, 60, 0.2); color: #fb923c; }
+        .badge-red { background: rgba(248, 113, 113, 0.2); color: #f87171; }
+        .kodif-group { margin-bottom: 16px; }
+        .kodif-header {
             display: flex; justify-content: space-between; align-items: center;
             padding: 10px 14px;
             background: rgba(255,255,255,0.04);
             border-radius: 10px; cursor: pointer;
             transition: background 0.2s;
-        }}
-        .kodif-header:hover {{ background: rgba(255,255,255,0.08); }}
-        .kodif-label {{ font-weight: 600; font-size: 14px; color: #c4b5fd; }}
-        .kodif-count {{
+        }
+        .kodif-header:hover { background: rgba(255,255,255,0.08); }
+        .kodif-label { font-weight: 600; font-size: 14px; color: #c4b5fd; }
+        .kodif-count {
             font-size: 12px; color: #6b7280;
             background: rgba(255,255,255,0.08);
             padding: 2px 10px; border-radius: 12px;
-        }}
-        .kodif-list {{ margin-top: 8px; overflow-x: auto; }}
-        .kodif-list table {{
-            width: 100%; border-collapse: collapse; font-size: 13px;
-        }}
-        .kodif-list th {{
+        }
+        .kodif-list { margin-top: 8px; overflow-x: auto; }
+        .kodif-list table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .kodif-list th {
             text-align: left; padding: 8px 12px;
             color: #9ca3af; border-bottom: 1px solid rgba(255,255,255,0.1);
             font-weight: 500; font-size: 12px;
-        }}
-        .kodif-list td {{
+        }
+        .kodif-list td {
             padding: 8px 12px;
             border-bottom: 1px solid rgba(255,255,255,0.04);
             color: #d1d5db;
-        }}
-        .kodif-list td.nup {{ color: #a78bfa; font-weight: 600; white-space: nowrap; }}
-        .kodif-list td.kodif {{ color: #60a5fa; font-size: 12px; white-space: nowrap; }}
-        .kodif-group.collapsed .kodif-list {{ display: none; }}
-        
-        .search-box {{
+        }
+        .kodif-list td.nup { color: #a78bfa; font-weight: 600; white-space: nowrap; }
+        .kodif-list td.kodif { color: #60a5fa; font-size: 12px; white-space: nowrap; }
+        .kodif-group.collapsed .kodif-list { display: none; }
+        .search-box {
             width: 100%; padding: 12px 20px; border-radius: 12px;
             border: 1px solid rgba(255,255,255,0.15);
             background: rgba(255,255,255,0.05); color: #fff;
             font-size: 14px; margin-bottom: 24px; outline: none;
             font-family: 'Inter', sans-serif;
-        }}
-        .search-box::placeholder {{ color: #6b7280; }}
-        .search-box:focus {{ border-color: rgba(167, 139, 250, 0.5); }}
-        
-        .footer {{ text-align: center; padding: 20px; font-size: 12px; color: #4b5563; }}
-        
-        @media (max-width: 600px) {{
-            .stats {{ grid-template-columns: 1fr 1fr; }}
-            .category {{ padding: 16px; }}
-        }}
+        }
+        .search-box::placeholder { color: #6b7280; }
+        .search-box:focus { border-color: rgba(167, 139, 250, 0.5); }
+        .footer { text-align: center; padding: 20px; font-size: 12px; color: #4b5563; }
+        .error { text-align: center; padding: 40px; color: #f87171; }
+        @media (max-width: 600px) {
+            .stats { grid-template-columns: 1fr 1fr; }
+            .category { padding: 16px; }
+        }
     </style>
 </head>
 <body>
@@ -519,112 +455,113 @@ async def sensus_page():
     <div class="container">
         <h1>📊 Sensus BMN</h1>
         <p class="subtitle">Perbandingan data CSV (databmnbuku.csv) dengan Google Sheet sensus</p>
-        
-        <div class="stats">
-            <div class="stat-card blue">
-                <div class="num">{len(csv_items)}</div>
-                <div class="label">Total Data CSV</div>
-            </div>
-            <div class="stat-card green">
-                <div class="num">{len(sensus_ditemukan)}</div>
-                <div class="label">Sensus & Ditemukan</div>
-            </div>
-            <div class="stat-card yellow">
-                <div class="num">{len(sensus_belum_ditemukan)}</div>
-                <div class="label">Sensus, Belum Ditemukan</div>
-            </div>
-            <div class="stat-card orange" style="background: rgba(251,146,60,0.1); border-color: rgba(251,146,60,0.2);">
-                <div class="num" style="color: #fb923c;">{len(di_sheet_tanpa_sensus)}</div>
-                <div class="label">Di Sheet, Tanpa Sensus</div>
-            </div>
-            <div class="stat-card red">
-                <div class="num">{len(belum_sensus)}</div>
-                <div class="label">Belum di Google Sheet</div>
+        <div id="stats"></div>
+        <div id="content">
+            <div class="loading">
+                <div class="spinner"></div>
+                Memuat data sensus...
             </div>
         </div>
-        
-        <input type="text" class="search-box" placeholder="🔍 Cari NUP atau Judul..." oninput="filterAll(this.value)">
-        
-        <!-- Sensus & Ditemukan -->
-        <div class="category" data-category="green">
-            <div class="category-header" onclick="this.parentElement.classList.toggle('collapsed')">
-                <div class="category-title">
-                    <span class="category-badge badge-green">✅</span>
-                    Sensus & Ditemukan
-                    <span class="category-badge badge-green">{len(sensus_ditemukan)}</span>
-                </div>
-            </div>
-            <div class="category-body">
-                {sensus_ditemukan_html if sensus_ditemukan_html else '<p style="color:#6b7280;padding:10px;">Tidak ada data</p>'}
-            </div>
-        </div>
-        
-        <!-- Sensus, Belum Ditemukan -->
-        <div class="category" data-category="yellow">
-            <div class="category-header" onclick="this.parentElement.classList.toggle('collapsed')">
-                <div class="category-title">
-                    <span class="category-badge badge-yellow">⚠️</span>
-                    Sensus, Belum Ditemukan
-                    <span class="category-badge badge-yellow">{len(sensus_belum_ditemukan)}</span>
-                </div>
-            </div>
-            <div class="category-body">
-                {sensus_belum_ditemukan_html if sensus_belum_ditemukan_html else '<p style="color:#6b7280;padding:10px;">Tidak ada data</p>'}
-            </div>
-        </div>
-        
-        <!-- Di Sheet Tanpa Sensus -->
-        <div class="category" data-category="orange">
-            <div class="category-header" onclick="this.parentElement.classList.toggle('collapsed')">
-                <div class="category-title">
-                    <span class="category-badge badge-orange">📋</span>
-                    Di Sheet, Tanpa Status Sensus
-                    <span class="category-badge badge-orange">{len(di_sheet_tanpa_sensus)}</span>
-                </div>
-            </div>
-            <div class="category-body">
-                {di_sheet_tanpa_sensus_html if di_sheet_tanpa_sensus_html else '<p style="color:#6b7280;padding:10px;">Tidak ada data</p>'}
-            </div>
-        </div>
-        
-        <!-- Belum di Google Sheet -->
-        <div class="category" data-category="red">
-            <div class="category-header" onclick="this.parentElement.classList.toggle('collapsed')">
-                <div class="category-title">
-                    <span class="category-badge badge-red">❌</span>
-                    Belum di Google Sheet
-                    <span class="category-badge badge-red">{len(belum_sensus)}</span>
-                </div>
-            </div>
-            <div class="category-body">
-                {belum_sensus_html if belum_sensus_html else '<p style="color:#6b7280;padding:10px;">Tidak ada data</p>'}
-            </div>
-        </div>
-        
-        <div class="footer">
-            Data: {len(csv_items)} item CSV | {len(sheet_items)} item Google Sheet | Built with FastAPI 🚀
-        </div>
+        <div class="footer">Built with FastAPI &amp; deployed on Vercel 🚀</div>
     </div>
-    
     <script>
-        function toggleGroup(el) {{
-            el.parentElement.classList.toggle('collapsed');
-        }}
-        function filterAll(query) {{
-            const q = query.toLowerCase();
-            document.querySelectorAll('.kodif-list tr').forEach(row => {{
+        function getGroup(k) {
+            if (!k || k === '-') return 'Tanpa Kodifikasi';
+            for (let c of k) { if (/[a-zA-Z]/.test(c)) return c.toUpperCase(); }
+            return 'Lainnya';
+        }
+        function groupByKodifikasi(items) {
+            const g = {};
+            items.forEach(item => {
+                const key = getGroup(item.kodifikasi);
+                if (!g[key]) g[key] = [];
+                g[key].push(item);
+            });
+            return Object.keys(g).sort().map(k => ({name: k, items: g[k]}));
+        }
+        function renderGroups(groups) {
+            if (groups.length === 0) return '<p style="color:#6b7280;padding:10px;">Tidak ada data</p>';
+            return groups.map(g => `
+                <div class="kodif-group collapsed">
+                    <div class="kodif-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <span class="kodif-label">📁 ${g.name}</span>
+                        <span class="kodif-count">${g.items.length} item</span>
+                    </div>
+                    <div class="kodif-list">
+                        <table>
+                            <thead><tr><th>No</th><th>NUP</th><th>Judul</th><th>Kodifikasi</th></tr></thead>
+                            <tbody>${g.items.map((item, i) => `
+                                <tr>
+                                    <td>${i+1}</td>
+                                    <td class="nup">${item.nup}</td>
+                                    <td>${item.judul.length > 60 ? item.judul.substring(0,60)+'...' : item.judul}</td>
+                                    <td class="kodif">${item.kodifikasi}</td>
+                                </tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `).join('');
+        }
+        function renderCategory(icon, badgeClass, title, count, groups) {
+            return `
+                <div class="category">
+                    <div class="category-header" onclick="this.parentElement.querySelector('.category-body').style.display = this.parentElement.querySelector('.category-body').style.display === 'none' ? 'block' : 'none'">
+                        <div class="category-title">
+                            <span class="category-badge ${badgeClass}">${icon}</span>
+                            ${title}
+                            <span class="category-badge ${badgeClass}">${count}</span>
+                        </div>
+                    </div>
+                    <div class="category-body">${renderGroups(groups)}</div>
+                </div>`;
+        }
+        function filterAll(q) {
+            q = q.toLowerCase();
+            document.querySelectorAll('.kodif-list tr').forEach(row => {
                 if (row.parentElement.tagName === 'THEAD') return;
-                const text = row.textContent.toLowerCase();
-                row.style.display = text.includes(q) ? '' : 'none';
-            }});
-            // Expand all groups when searching
-            if (q.length > 0) {{
+                row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+            });
+            if (q.length > 0) {
                 document.querySelectorAll('.kodif-group.collapsed').forEach(g => g.classList.remove('collapsed'));
-            }}
-        }}
+                document.querySelectorAll('.category-body').forEach(b => b.style.display = 'block');
+            }
+        }
+        async function loadData() {
+            try {
+                const resp = await fetch('/api/sensus');
+                if (!resp.ok) throw new Error('API error');
+                const data = await resp.json();
+                const sd = data.sensus_ditemukan || [];
+                const sbd = data.sensus_belum_ditemukan || [];
+                const ds = data.di_sheet_tanpa_sensus || [];
+                const bs = data.belum_sensus || [];
+                document.getElementById('stats').innerHTML = `
+                    <div class="stats">
+                        <div class="stat-card"><div class="num" style="color:#60a5fa">${sd.length+sbd.length+ds.length+bs.length}</div><div class="label">Total CSV</div></div>
+                        <div class="stat-card"><div class="num" style="color:#4ade80">${sd.length}</div><div class="label">Sensus & Ditemukan</div></div>
+                        <div class="stat-card"><div class="num" style="color:#facc15">${sbd.length}</div><div class="label">Sensus, Belum Ditemukan</div></div>
+                        <div class="stat-card"><div class="num" style="color:#fb923c">${ds.length}</div><div class="label">Di Sheet, Tanpa Sensus</div></div>
+                        <div class="stat-card"><div class="num" style="color:#f87171">${bs.length}</div><div class="label">Belum di Google Sheet</div></div>
+                    </div>
+                    <input type="text" class="search-box" placeholder="🔍 Cari NUP atau Judul..." oninput="filterAll(this.value)">
+                    ${renderCategory('✅','badge-green','Sensus & Ditemukan',sd.length,groupByKodifikasi(sd))}
+                    ${renderCategory('⚠️','badge-yellow','Sensus, Belum Ditemukan',sbd.length,groupByKodifikasi(sbd))}
+                    ${renderCategory('📋','badge-orange','Di Sheet, Tanpa Status Sensus',ds.length,groupByKodifikasi(ds))}
+                    ${renderCategory('❌','badge-red','Belum di Google Sheet',bs.length,groupByKodifikasi(bs))}
+                `;
+            } catch(e) {
+                document.getElementById('content').innerHTML = `<div class="error">❌ Gagal memuat data: ${e.message}</div>`;
+            }
+        }
+        loadData();
     </script>
 </body>
 </html>"""
+
+@app.get("/sensus", response_class=HTMLResponse)
+async def sensus_page():
+    return SENsus_HTML
 
 
 # ========== API ==========
