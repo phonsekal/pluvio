@@ -632,9 +632,9 @@ SENsus_HTML = """<!DOCTYPE html>
 
                 document.getElementById('stats').innerHTML = `
                     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
-                        ${statCard('sec-bs', '❌', '#f87171', bs.length, 'Belum di Sheet', 0)}
-                        ${statCard('sec-sbd', '⚠️', '#facc15', sbd.length, 'Sensus, Belum Ditemukan', 80)}
-                        ${statCard('sec-ds', '📋', '#fb923c', ds.length, 'Ditemukan, Belum Sensus', 160)}
+                        ${statCard('sec-bs', '❌', '#f87171', bs.length, 'Belum Ditemukan & Dikirim', 0)}
+                        ${statCard('sec-sbd', '⚠️', '#facc15', sbd.length, 'Ditemukan, Belum Sensus', 80)}
+                        ${statCard('sec-ds', '📋', '#fb923c', ds.length, 'Sensus, Belum Dikirim', 160)}
                         ${statCard('sec-sd', '✅', '#4ade80', sd.length, 'Sensus & Ditemukan', 240)}
                         ${statCardTotal(total, 320)}
                     </div>`;
@@ -642,9 +642,9 @@ SENsus_HTML = """<!DOCTYPE html>
                 document.getElementById('searchWrap').classList.remove('hidden');
 
                 document.getElementById('content').innerHTML =
-                    categoryHTML('bs', '❌', 'bg-red-500/15 text-red-400', 'Belum di Google Sheet', bs.length, groupByKodifikasi(bs), 400) +
-                    categoryHTML('sbd', '⚠️', 'bg-yellow-500/15 text-yellow-400', 'Sensus, Belum Ditemukan', sbd.length, groupByKodifikasi(sbd), 480) +
-                    categoryHTML('ds', '📋', 'bg-orange-500/15 text-orange-400', 'Ditemukan, Belum Sensus', ds.length, groupByKodifikasi(ds), 560) +
+                    categoryHTML('bs', '❌', 'bg-red-500/15 text-red-400', 'Belum Ditemukan dan Dikirim', bs.length, groupByKodifikasi(bs), 400) +
+                    categoryHTML('sbd', '⚠️', 'bg-yellow-500/15 text-yellow-400', 'Ditemukan, Belum Sensus', sbd.length, groupByKodifikasi(sbd), 480) +
+                    categoryHTML('ds', '📋', 'bg-orange-500/15 text-orange-400', 'Sensus, Belum Dikirim', ds.length, groupByKodifikasi(ds), 560) +
                     categoryHTML('sd', '✅', 'bg-emerald-500/15 text-emerald-400', 'Sensus & Ditemukan', sd.length, groupByKodifikasi(sd), 640);
 
                 // Show last updated
