@@ -117,15 +117,22 @@ def get_kodifikasi_group(kodifikasi: str) -> str:
     return "Lainnya"
 
 def compare_data(csv_items, sheet_items):
-    """Compare CSV with Google Sheet"""
+    """Compare CSV with Google Sheet.
+    
+    Categories (based only on Status column in Sheet, ignoring Catatan):
+    1. belum_sensus       - item not found in Sheet at all
+    2. sensus_ditemukan   - in Sheet with Status == 'Ditemukan'
+    3. sensus_belum_ditemukan - in Sheet with Status != 'Ditemukan'
+    4. sudah_ditemukan_belum_sensus - same as 3, different label for display
+    """
     sheet_lookup = {}
     for item in sheet_items:
         sheet_lookup[item["nup"]] = item
     
+    belum_sensus = []
     sensus_ditemukan = []
     sensus_belum_ditemukan = []
-    di_sheet_tanpa_sensus = []
-    belum_sensus = []
+    sudah_ditemukan_belum_sensus = []
     
     for csv_item in csv_items:
         nup = csv_item["nup"]
@@ -134,22 +141,15 @@ def compare_data(csv_items, sheet_items):
         if nup in sheet_lookup:
             sheet_item = sheet_lookup[nup]
             judul_sheet = sheet_item["judul"]
-            # Prefer sheet judul over CSV Merk if sheet has it
             display_judul = judul_sheet if judul_sheet else judul
-            if sheet_item["catatan"] == "sensus" and sheet_item["status_ditemukan"]:
+            if sheet_item["status_ditemukan"]:
                 sensus_ditemukan.append({
                     "nup": nup,
                     "judul": display_judul,
                     "kodifikasi": kodifikasi,
                 })
-            elif sheet_item["catatan"] == "sensus" and not sheet_item["status_ditemukan"]:
-                sensus_belum_ditemukan.append({
-                    "nup": nup,
-                    "judul": display_judul,
-                    "kodifikasi": kodifikasi,
-                })
             else:
-                di_sheet_tanpa_sensus.append({
+                sudah_ditemukan_belum_sensus.append({
                     "nup": nup,
                     "judul": display_judul,
                     "kodifikasi": kodifikasi,
@@ -158,14 +158,14 @@ def compare_data(csv_items, sheet_items):
             belum_sensus.append({
                 "nup": nup,
                 "judul": judul,
-                "kodifikasi": csv_item["kodifikasi"]
+                "kodifikasi": kodifikasi
             })
     
     return {
+        "belum_sensus": belum_sensus,
         "sensus_ditemukan": sensus_ditemukan,
         "sensus_belum_ditemukan": sensus_belum_ditemukan,
-        "di_sheet_tanpa_sensus": di_sheet_tanpa_sensus,
-        "belum_sensus": belum_sensus
+        "sudah_ditemukan_belum_sensus": sudah_ditemukan_belum_sensus
     }
 
 def group_by_kodifikasi(items):
@@ -543,7 +543,7 @@ SENsus_HTML = """<!DOCTYPE html>
                 const data = await resp.json();
                 const sd = data.sensus_ditemukan || [];
                 const sbd = data.sensus_belum_ditemukan || [];
-                const ds = data.di_sheet_tanpa_sensus || [];
+                const ds = data.sudah_ditemukan_belum_sensus || [];
                 const bs = data.belum_sensus || [];
                 document.getElementById('stats').innerHTML = `
                     <div class="stats">
@@ -557,7 +557,7 @@ SENsus_HTML = """<!DOCTYPE html>
                     <div id="sec-bs">${renderCategory('❌','badge-red','Belum di Google Sheet',bs.length,groupByKodifikasi(bs))}</div>
                     <div id="sec-sd">${renderCategory('✅','badge-green','Sensus & Ditemukan',sd.length,groupByKodifikasi(sd))}</div>
                     <div id="sec-sbd">${renderCategory('⚠️','badge-yellow','Sensus, Belum Ditemukan',sbd.length,groupByKodifikasi(sbd))}</div>
-                    <div id="sec-ds">${renderCategory('📋','badge-orange','Di Sheet, Tanpa Status Sensus',ds.length,groupByKodifikasi(ds))}</div>
+                    <div id="sec-ds">${renderCategory('📋','badge-orange','Sudah Ditemukan dan Belum Sensus',ds.length,groupByKodifikasi(ds))}</div>
                 `;
             } catch(e) {
                 document.getElementById('content').innerHTML = `<div class="error">❌ Gagal memuat data: ${e.message}</div>`;
