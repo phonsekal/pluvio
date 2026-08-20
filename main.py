@@ -332,8 +332,8 @@ def compare_data(csv_items, sheet_items, inventory_items):
     Iterate from CSV side so total always equals CSV count.
     For each CSV item:
       1. In Census Sheet with Status='Ditemukan' → sensus_ditemukan
-      2. In Census Sheet with Status='' → sudah_ditemukan_belum_sensus
-      3. NOT in Census Sheet, but in Excel → sensus_belum_ditemukan
+      2. In Census Sheet with Status='' → sensus_belum_ditemukan
+      3. NOT in Census Sheet, but in Excel with Status='Ditemukan' → sudah_ditemukan_belum_sensus
       4. NOT in Census Sheet, NOT in Excel → belum_sensus
     """
     # Build Census Sheet lookup (NUP → status)
@@ -341,12 +341,13 @@ def compare_data(csv_items, sheet_items, inventory_items):
     for si in sheet_items:
         sheet_lookup[si["nup"]] = si
 
-    # Build Excel inventory NUP set (strip/normalize)
-    inventory_nups = set()
+    # Build Excel inventory NUP set (only Status='Ditemukan')
+    inventory_ditemukan_nups = set()
     for inv in inventory_items:
-        nup = inv.get("nup", "").strip()
-        if nup:
-            inventory_nups.add(nup)
+        if inv.get("status", "").strip() == "Ditemukan":
+            nup = inv.get("nup", "").strip()
+            if nup:
+                inventory_ditemukan_nups.add(nup)
 
     belum_sensus = []
     sensus_ditemukan = []
@@ -367,20 +368,13 @@ def compare_data(csv_items, sheet_items, inventory_items):
                     "nup": nup, "judul": display_judul, "kodifikasi": kodifikasi,
                 })
             else:
-                # Category 2: Ditemukan, Belum Sensus (in Sheet, Status='', not in Excel)
-                # Check if also in Excel inventory
-                if nup in inventory_nups:
-                    # In Sheet AND in Excel but Status='' → Sensus, Belum Dikirim
-                    sudah_ditemukan_belum_sensus.append({
-                        "nup": nup, "judul": display_judul, "kodifikasi": kodifikasi,
-                    })
-                else:
-                    sensus_belum_ditemukan.append({
-                        "nup": nup, "judul": display_judul, "kodifikasi": kodifikasi,
-                    })
+                # Category 2: Ditemukan, Belum Sensus (in Sheet, Status='')
+                sensus_belum_ditemukan.append({
+                    "nup": nup, "judul": display_judul, "kodifikasi": kodifikasi,
+                })
         else:
             # Not in Census Sheet
-            if nup in inventory_nups:
+            if nup in inventory_ditemukan_nups:
                 # Category 3: Sensus, Belum Dikirim (in Excel but not in Census Sheet)
                 sudah_ditemukan_belum_sensus.append({
                     "nup": nup, "judul": judul, "kodifikasi": kodifikasi,
