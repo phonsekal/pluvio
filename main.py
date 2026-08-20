@@ -1,9 +1,10 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 import csv
 import io
 import httpx
+import os
+from pathlib import Path
 from collections import defaultdict
 
 app = FastAPI(title="PLUVIO - Profil & Sensus BMN")
@@ -47,44 +48,63 @@ PROFILE = {
 
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1CtWwWaMNW8lhkAHsCUhSNHBZxGAWlTrqDABzRM4_wkk/export?format=csv&gid=0"
 
+CSV_PATH = Path(__file__).parent / "databmnbuku.csv"
+
+_csv_cache = None
+
 def read_csv_local():
-    """Read databmnbuku.csv"""
+    """Read databmnbuku.csv with caching"""
+    global _csv_cache
+    if _csv_cache is not None:
+        return _csv_cache
     items = []
-    with open("databmnbuku.csv", "r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f, delimiter=";")
+    try:
+        with open(CSV_PATH, "r", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f, delimiter=";")
+            for row in reader:
+                nup = row.get("NUP", "").strip()
+                judul = row.get("Nama Barang", "").strip()
+                kodifikasi = row.get("Kode1", "").strip()
+                if nup:
+                    items.append({
+                        "nup": nup,
+                        "judul": judul,
+                        "kodifikasi": kodifikasi
+                    })
+    except Exception as e:
+        print(f"Error reading CSV: {e}")
+    _csv_cache = items
+    return items
+
+_sheet_cache = None
+
+async def read_google_sheet():
+    """Read Google Sheet CSV with caching"""
+    global _sheet_cache
+    if _sheet_cache is not None:
+        return _sheet_cache
+    items = []
+    try:
+        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+            resp = await client.get(GOOGLE_SHEET_URL)
+            resp.raise_for_status()
+        reader = csv.DictReader(io.StringIO(resp.text))
         for row in reader:
             nup = row.get("NUP", "").strip()
-            judul = row.get("Nama Barang", "").strip()
-            kodifikasi = row.get("Kode1", "").strip()
+            judul = row.get("Judul", "").strip()
+            catatan = row.get("Catatan", "").strip()
+            status_val = row.get("Status", "").strip()
             if nup:
                 items.append({
                     "nup": nup,
                     "judul": judul,
-                    "kodifikasi": kodifikasi
+                    "catatan": catatan,
+                    "status_ditemukan": status_val == "Ditemukan"
                 })
-    return items
-
-async def read_google_sheet():
-    """Read Google Sheet CSV"""
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        resp = await client.get(GOOGLE_SHEET_URL)
-        resp.raise_for_status()
-    
-    reader = csv.DictReader(io.StringIO(resp.text))
-    items = []
-    for row in reader:
-        nup = row.get("NUP", "").strip()
-        judul = row.get("Judul", "").strip()
-        catatan = row.get("Catatan", "").strip()
-        # Status column has 'Ditemukan' when the item was found
-        status_val = row.get("Status", "").strip()
-        if nup:
-            items.append({
-                "nup": nup,
-                "judul": judul,
-                "catatan": catatan,
-                "status_ditemukan": status_val == "Ditemukan"
-            })
+    except Exception as e:
+        print(f"Error fetching Google Sheet: {e}")
+        items = []
+    _sheet_cache = items
     return items
 
 def get_kodifikasi_group(kodifikasi: str) -> str:
