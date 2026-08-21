@@ -408,7 +408,7 @@ SENsus_HTML = """<!DOCTYPE html>
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
             background: url('/static/background.jpg') center center / cover no-repeat;
-            filter: brightness(0.3) saturate(1.3);
+            filter: brightness(0.4) saturate(1.2);
             z-index: -2;
         }
         .bg-overlay {
@@ -418,8 +418,8 @@ SENsus_HTML = """<!DOCTYPE html>
                         linear-gradient(to bottom, transparent 0%, rgba(10,10,10,0.7) 100%);
             z-index: -1;
         }
-        .glass { background: rgba(0,0,0,0.45); backdrop-filter: blur(24px) saturate(1.5); border: 1px solid rgba(249,115,22,0.15); }
-        .glass-hover:hover { background: rgba(0,0,0,0.55); border-color: rgba(249,115,22,0.3); }
+        .glass { background: rgba(0,0,0,0.5); border: 1px solid rgba(249,115,22,0.2); }
+        .glass-hover:hover { background: rgba(0,0,0,0.6); border-color: rgba(249,115,22,0.4); }
         .gradient-border { position: relative; }
         .gradient-border::before { content: ''; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; background: linear-gradient(135deg, rgba(249,115,22,0.5), rgba(234,88,12,0.5), rgba(250,204,21,0.3)); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; opacity: 0; transition: opacity 0.4s; }
         .gradient-border:hover::before { opacity: 1; }
