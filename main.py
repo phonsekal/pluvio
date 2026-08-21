@@ -391,7 +391,8 @@ SENsus_HTML = """<!DOCTYPE html>
                 extend: {
                     fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
                     colors: {
-                        dark: { 900: '#0a0a1a', 800: '#111127', 700: '#1a1a3e' },
+                        dark: { 900: '#1a0f00', 800: '#2d1a00', 700: '#3d2500' },
+                        orange: { 500: '#f97316', 600: '#ea580c', 700: '#c2410c' },
                     }
                 }
             }
@@ -400,10 +401,10 @@ SENsus_HTML = """<!DOCTYPE html>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', system-ui, sans-serif; }
-        .glass { background: rgba(255,255,255,0.03); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.06); }
-        .glass-hover:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); }
+        .glass { background: rgba(255,150,50,0.05); backdrop-filter: blur(20px); border: 1px solid rgba(255,150,50,0.1); }
+        .glass-hover:hover { background: rgba(255,150,50,0.1); border-color: rgba(255,150,50,0.2); }
         .gradient-border { position: relative; }
-        .gradient-border::before { content: ''; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; background: linear-gradient(135deg, rgba(99,102,241,0.3), rgba(168,85,247,0.3), rgba(236,72,153,0.3)); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
+        .gradient-border::before { content: ''; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; background: linear-gradient(135deg, rgba(249,115,22,0.4), rgba(234,88,12,0.4), rgba(194,65,12,0.4)); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
         .gradient-border:hover::before { opacity: 1; }
         .shimmer { background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%); background-size: 200% 100%; animation: shimmer 2s infinite; }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
@@ -421,7 +422,7 @@ SENsus_HTML = """<!DOCTYPE html>
     <header class="sticky top-0 z-50 glass border-b border-white/5">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
             <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-indigo-500/20">P</div>
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-orange-500/20">P</div>
                 <div>
                     <h1 class="text-lg font-bold text-white tracking-tight">PLUVIO</h1>
                     <p class="text-[11px] text-gray-500 font-medium tracking-wide uppercase">Sensus BMN Dashboard</p>
@@ -435,8 +436,7 @@ SENsus_HTML = """<!DOCTYPE html>
     <main class="max-w-7xl mx-auto px-4 sm:px-6 py-8">
         <!-- Title -->
         <div class="text-center mb-10 fade-up">
-            <h2 class="text-3xl sm:text-4xl font-extrabold text-white mb-3 tracking-tight">
-                Sensus <span class="bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">BMN</span>
+            <h2 class="text-3xl sm:text-4xl font-extrabold text-white mb-3 tracking-tight">                    Sensus <span class="bg-gradient-to-r from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent">BMN</span>
             </h2>
             <p class="text-gray-500 text-sm max-w-lg mx-auto">Perbandingan data <span class="text-gray-400">databmnbuku.csv</span> dengan Google Sheet sensus & inventarisasi</p>
         </div>
@@ -448,7 +448,7 @@ SENsus_HTML = """<!DOCTYPE html>
         <div id="searchWrap" class="mb-8 hidden">
             <div class="relative max-w-xl mx-auto">
                 <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                <input type="text" id="searchInput" class="w-full pl-12 pr-4 py-3.5 rounded-2xl glass text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all" placeholder="Cari NUP atau Judul buku...">
+                <input type="text" id="searchInput" class="w-full pl-12 pr-4 py-3.5 rounded-2xl glass text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/40 transition-all" placeholder="Cari NUP atau Judul buku...">
                 <span id="searchCount" class="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-gray-600 hidden"></span>
             </div>
         </div>
@@ -456,7 +456,7 @@ SENsus_HTML = """<!DOCTYPE html>
         <!-- Content -->
         <div id="content">
             <div class="flex flex-col items-center justify-center py-24">
-                <div class="w-12 h-12 border-3 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin mb-4"></div>
+                <div class="w-12 h-12 border-3 border-orange-500/20 border-t-orange-500 rounded-full animate-spin mb-4"></div>
                 <p class="text-gray-500 text-sm">Memuat data sensus...</p>
             </div>
         </div>
@@ -496,8 +496,8 @@ SENsus_HTML = """<!DOCTYPE html>
                 <div class="mb-3" data-group="${catId}-${g.name}">
                     <button onclick="toggleGroup(this)" class="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] transition-all text-left group">
                         <div class="flex items-center gap-3">
-                            <svg class="w-4 h-4 text-gray-500 group-hover:text-indigo-400 transition-transform chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                            <span class="text-sm font-semibold text-indigo-300/80">${escapeHtml(g.name)}</span>
+                            <svg class="w-4 h-4 text-gray-500 group-hover:text-orange-400 transition-transform chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            <span class="text-sm font-semibold text-orange-300/80">${escapeHtml(g.name)}</span>
                         </div>
                         <span class="text-xs text-gray-600 bg-white/5 px-2.5 py-1 rounded-full">${g.items.length} item</span>
                     </button>
@@ -512,7 +512,7 @@ SENsus_HTML = """<!DOCTYPE html>
                             <tbody>${g.items.map((item, i) => `
                                 <tr class="border-t border-white/[0.03] hover:bg-white/[0.02]">
                                     <td class="py-2 pl-4 text-gray-600 text-xs">${i + 1}</td>
-                                    <td class="py-2 font-mono text-indigo-400/80 font-semibold text-xs whitespace-nowrap">${escapeHtml(item.nup)}</td>
+                                    <td class="py-2 font-mono text-orange-400/80 font-semibold text-xs whitespace-nowrap">${escapeHtml(item.nup)}</td>
                                     <td class="py-2 pr-4 text-gray-300 text-xs">${escapeHtml(item.judul.length > 65 ? item.judul.substring(0, 65) + '…' : item.judul)}</td>
                                     <td class="py-2 text-blue-400/60 text-xs font-mono whitespace-nowrap">${escapeHtml(item.kodifikasi)}</td>
                                 </tr>`).join('')}
@@ -579,7 +579,7 @@ SENsus_HTML = """<!DOCTYPE html>
         function statCardTotal(count, delay) {
             return `
                 <div class="glass rounded-2xl p-5 text-center fade-up" style="animation-delay:${delay}ms">
-                    <div class="text-3xl sm:text-4xl font-extrabold mb-1 bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">${count.toLocaleString()}</div>
+                    <div class="text-3xl sm:text-4xl font-extrabold mb-1 bg-gradient-to-r from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent">${count.toLocaleString()}</div>
                     <div class="text-[11px] text-gray-500 font-medium uppercase tracking-wider">📊 Total Data</div>
                 </div>`;
         }
@@ -647,7 +647,7 @@ SENsus_HTML = """<!DOCTYPE html>
                         <div class="text-4xl mb-4">❌</div>
                         <p class="text-red-400 font-medium">Gagal memuat data</p>
                         <p class="text-gray-600 text-sm mt-2">${escapeHtml(e.message)}</p>
-                        <button onclick="loadData()" class="mt-4 px-6 py-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 text-sm font-medium hover:bg-indigo-500/30 transition-colors">Coba Lagi</button>
+                        <button onclick="loadData()" class="mt-4 px-6 py-2.5 rounded-xl bg-orange-500/20 text-orange-400 text-sm font-medium hover:bg-orange-500/30 transition-colors">Coba Lagi</button>
                     </div>`;
             }
         }
