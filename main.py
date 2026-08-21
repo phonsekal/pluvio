@@ -9,7 +9,6 @@ import re
 import tempfile
 from pathlib import Path
 from collections import defaultdict
-from datetime import datetime
 
 app = FastAPI(title="PLUVIO - Sensus BMN")
 
@@ -50,14 +49,10 @@ def _get_gdrive_creds():
 
 
 # ── CSV (databmnbuku.csv) ───────────────────────────────────────────
-_csv_cache = None
 
 
 def read_csv_local():
     """Read databmnbuku.csv. Kodifikasi = Kode1/Kode2/Kode3."""
-    global _csv_cache
-    if _csv_cache is not None:
-        return _csv_cache
     items = []
     try:
         with open(CSV_PATH, "r", encoding="utf-8-sig") as f:
@@ -75,18 +70,13 @@ def read_csv_local():
                     items.append({"nup": nup, "judul": judul, "kodifikasi": kodifikasi})
     except Exception as e:
         print(f"Error reading CSV: {e}")
-    _csv_cache = items
     return items
 
 
 # ── Google Sheets (Census) ─────────────────────────────────────────
-_sheet_cache = None
 
 
 async def read_google_sheet():
-    global _sheet_cache
-    if _sheet_cache is not None:
-        return _sheet_cache
     items = []
     try:
         async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
@@ -106,7 +96,6 @@ async def read_google_sheet():
     except Exception as e:
         print(f"Error fetching Google Sheet: {e}")
         items = []
-    _sheet_cache = items
     return items
 
 
@@ -148,9 +137,6 @@ def _get_drive_service():
 
 
 # ── Inventory (Google Drive Excel) ─────────────────────────────────
-_inventory_cache = None
-_inventory_ts = 0
-CACHE_TTL = 300
 
 
 def _read_sheet_via_api(spreadsheet_id):
@@ -281,18 +267,11 @@ def _parse_excel_file(path):
 
 
 def read_inventory():
-    """Read inventory Excel with caching."""
-    global _inventory_cache, _inventory_ts
-    now = datetime.now().timestamp()
-    if _inventory_cache is not None and (now - _inventory_ts) < CACHE_TTL:
-        return _inventory_cache
-
+    """Read inventory Excel — always fresh, no cache."""
     # Try Google Sheets API first (if spreadsheet ID configured)
     if INVENTORY_SPREADSHEET_ID:
         items = _read_sheet_via_api(INVENTORY_SPREADSHEET_ID)
         if items:
-            _inventory_cache = items
-            _inventory_ts = now
             return items
 
     # Try Google Drive (find + download + parse Excel)
@@ -307,12 +286,8 @@ def read_inventory():
             except OSError:
                 pass
             if items:
-                _inventory_cache = items
-                _inventory_ts = now
                 return items
 
-    _inventory_cache = []
-    _inventory_ts = now
     return []
 
 
