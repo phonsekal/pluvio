@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 import csv
 import io
 import httpx
@@ -11,6 +12,7 @@ from pathlib import Path
 from collections import defaultdict
 
 app = FastAPI(title="PLUVIO - Sensus BMN")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ── Config ──────────────────────────────────────────────────────────
 CENSUS_SHEET_URL = os.environ.get(
@@ -400,29 +402,48 @@ SENsus_HTML = """<!DOCTYPE html>
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', system-ui, sans-serif; }
-        .glass { background: rgba(255,150,50,0.05); backdrop-filter: blur(20px); border: 1px solid rgba(255,150,50,0.1); }
-        .glass-hover:hover { background: rgba(255,150,50,0.1); border-color: rgba(255,150,50,0.2); }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', system-ui, sans-serif; min-height: 100vh; background: #0a0a0a; }
+        .bg-dramatic {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: url('/static/background.jpg') center center / cover no-repeat;
+            filter: brightness(0.3) saturate(1.3);
+            z-index: -2;
+        }
+        .bg-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(135deg, rgba(249,115,22,0.15) 0%, transparent 40%, rgba(234,88,12,0.1) 100%),
+                        linear-gradient(to bottom, transparent 0%, rgba(10,10,10,0.7) 100%);
+            z-index: -1;
+        }
+        .glass { background: rgba(0,0,0,0.45); backdrop-filter: blur(24px) saturate(1.5); border: 1px solid rgba(249,115,22,0.15); }
+        .glass-hover:hover { background: rgba(0,0,0,0.55); border-color: rgba(249,115,22,0.3); }
         .gradient-border { position: relative; }
-        .gradient-border::before { content: ''; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; background: linear-gradient(135deg, rgba(249,115,22,0.4), rgba(234,88,12,0.4), rgba(194,65,12,0.4)); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
+        .gradient-border::before { content: ''; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; background: linear-gradient(135deg, rgba(249,115,22,0.5), rgba(234,88,12,0.5), rgba(250,204,21,0.3)); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; opacity: 0; transition: opacity 0.4s; }
         .gradient-border:hover::before { opacity: 1; }
-        .shimmer { background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%); background-size: 200% 100%; animation: shimmer 2s infinite; }
-        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        .fade-up { animation: fadeUp 0.5s ease-out forwards; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(30px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .fade-up { animation: fadeUp 0.6s cubic-bezier(0.16,1,0.3,1) forwards; }
+        @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 20px rgba(249,115,22,0.1); } 50% { box-shadow: 0 0 40px rgba(249,115,22,0.2); } }
+        .glow-pulse { animation: pulse-glow 3s ease-in-out infinite; }
+        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+        .float { animation: float 4s ease-in-out infinite; }
         .scrollbar-thin::-webkit-scrollbar { width: 6px; }
         .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
-        .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
-        .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(249,115,22,0.3); border-radius: 3px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: rgba(249,115,22,0.5); }
     </style>
 </head>
-<body class="bg-dark-900 text-gray-200 min-h-screen">
+<body class="text-gray-200 min-h-screen">
+    <div class="bg-dramatic"></div>
+    <div class="bg-overlay"></div>
 
     <!-- Header -->
-    <header class="sticky top-0 z-50 glass border-b border-white/5">
+    <header class="sticky top-0 z-50 glass border-b border-orange-500/10 glow-pulse">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
             <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-orange-500/20">P</div>
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-orange-500/30 float">P</div>
                 <div>
                     <h1 class="text-lg font-bold text-white tracking-tight">PLUVIO</h1>
                     <p class="text-[11px] text-gray-500 font-medium tracking-wide uppercase">Sensus BMN Dashboard</p>
@@ -436,7 +457,7 @@ SENsus_HTML = """<!DOCTYPE html>
     <main class="max-w-7xl mx-auto px-4 sm:px-6 py-8">
         <!-- Title -->
         <div class="text-center mb-10 fade-up">
-            <h2 class="text-3xl sm:text-4xl font-extrabold text-white mb-3 tracking-tight">                    Sensus <span class="bg-gradient-to-r from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent">BMN</span>
+            <h2 class="text-4xl sm:text-5xl font-black text-white mb-3 tracking-tight drop-shadow-lg">                    📚 Sensus <span class="bg-gradient-to-r from-orange-400 via-amber-400 to-yellow-300 bg-clip-text text-transparent">BMN</span>
             </h2>
             <p class="text-gray-500 text-sm max-w-lg mx-auto">Perbandingan data <span class="text-gray-400">databmnbuku.csv</span> dengan Google Sheet sensus & inventarisasi</p>
         </div>
@@ -570,37 +591,37 @@ SENsus_HTML = """<!DOCTYPE html>
         // ── Stat Card HTML ──
         function statCard(id, icon, color, count, label, delay) {
             return `
-                <button onclick="scrollToSection('${id}')" class="glass glass-hover gradient-border rounded-2xl p-5 text-center transition-all duration-300 hover:scale-[1.02] hover:-translate-y-1 fade-up" style="animation-delay:${delay}ms">
-                    <div class="text-3xl sm:text-4xl font-extrabold mb-1" style="color:${color}">${count.toLocaleString()}</div>
-                    <div class="text-[11px] text-gray-500 font-medium uppercase tracking-wider">${icon} ${label}</div>
+                <button onclick="scrollToSection('${id}')" class="glass glass-hover gradient-border rounded-2xl p-6 text-center transition-all duration-500 hover:scale-105 hover:-translate-y-2 fade-up glow-pulse" style="animation-delay:${delay}ms; box-shadow: 0 4px 30px ${color}15;">
+                    <div class="text-4xl sm:text-5xl font-black mb-2" style="color:${color}; text-shadow: 0 0 30px ${color}40;">${count.toLocaleString()}</div>
+                    <div class="text-[11px] text-gray-400 font-semibold uppercase tracking-widest">${icon} ${label}</div>
                 </button>`;
         }
 
         function statCardTotal(count, delay) {
             return `
-                <div class="glass rounded-2xl p-5 text-center fade-up" style="animation-delay:${delay}ms">
-                    <div class="text-3xl sm:text-4xl font-extrabold mb-1 bg-gradient-to-r from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent">${count.toLocaleString()}</div>
-                    <div class="text-[11px] text-gray-500 font-medium uppercase tracking-wider">📊 Total Data</div>
+                <div class="glass rounded-2xl p-6 text-center fade-up glow-pulse" style="animation-delay:${delay}ms; box-shadow: 0 4px 30px rgba(249,115,22,0.15);">
+                    <div class="text-4xl sm:text-5xl font-black mb-2 bg-gradient-to-r from-orange-300 via-amber-400 to-yellow-300 bg-clip-text text-transparent" style="filter: drop-shadow(0 0 20px rgba(249,115,22,0.3));">${count.toLocaleString()}</div>
+                    <div class="text-[11px] text-gray-400 font-semibold uppercase tracking-widest">📊 Total Data</div>
                 </div>`;
         }
 
         function categoryHTML(catId, icon, colorClass, title, count, groups, delay) {
             return `
-                <div class="glass rounded-2xl overflow-hidden mb-6 fade-up" style="animation-delay:${delay}ms" id="sec-${catId}">
-                    <button onclick="toggleCategory('${catId}')" class="w-full flex items-center justify-between px-6 py-5 hover:bg-white/[0.02] transition-colors text-left">
-                        <div class="flex items-center gap-4">
-                            <span class="text-2xl">${icon}</span>
+                <div class="glass rounded-3xl overflow-hidden mb-8 fade-up glow-pulse" style="animation-delay:${delay}ms" id="sec-${catId}">
+                    <button onclick="toggleCategory('${catId}')" class="w-full flex items-center justify-between px-8 py-6 hover:bg-orange-500/5 transition-all duration-300 text-left group">
+                        <div class="flex items-center gap-5">
+                            <span class="text-3xl transform group-hover:scale-110 transition-transform">${icon}</span>
                             <div>
-                                <h3 class="text-base font-bold text-white">${title}</h3>
-                                <p class="text-xs text-gray-500 mt-0.5">${count.toLocaleString()} item</p>
+                                <h3 class="text-lg font-bold text-white tracking-tight">${title}</h3>
+                                <p class="text-xs text-gray-500 mt-1">${count.toLocaleString()} item</p>
                             </div>
                         </div>
-                        <div class="flex items-center gap-3">
-                            <span class="text-xs font-bold px-3 py-1.5 rounded-full ${colorClass}">${count.toLocaleString()}</span>
-                            <svg class="w-5 h-5 text-gray-500 chevron transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                        <div class="flex items-center gap-4">
+                            <span class="text-sm font-bold px-4 py-2 rounded-xl ${colorClass}">${count.toLocaleString()}</span>
+                            <svg class="w-6 h-6 text-gray-500 chevron transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                         </div>
                     </button>
-                    <div id="${catId}-body" class="hidden px-6 pb-6">
+                    <div id="${catId}-body" class="hidden px-8 pb-8">
                         ${renderGroups(groups, catId)}
                     </div>
                 </div>`;
