@@ -408,14 +408,12 @@ SENsus_HTML = """<!DOCTYPE html>
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
             background: url('/static/background.jpg') center center / cover no-repeat;
-            filter: brightness(0.4) saturate(1.2);
             z-index: -2;
         }
         .bg-overlay {
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
-            background: linear-gradient(135deg, rgba(249,115,22,0.15) 0%, transparent 40%, rgba(234,88,12,0.1) 100%),
-                        linear-gradient(to bottom, transparent 0%, rgba(10,10,10,0.7) 100%);
+            background: linear-gradient(to bottom, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.5) 100%);
             z-index: -1;
         }
         .glass { background: rgba(0,0,0,0.5); border: 1px solid rgba(249,115,22,0.2); }
