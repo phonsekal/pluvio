@@ -401,8 +401,8 @@ SENsus_HTML = """<!DOCTYPE html>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', system-ui, sans-serif; }
-        .glass { background: rgba(255,150,50,0.05); backdrop-filter: blur(20px); border: 1px solid rgba(255,150,50,0.1); }
-        .glass-hover:hover { background: rgba(255,150,50,0.1); border-color: rgba(255,150,50,0.2); }
+        .glass { background: rgba(0,0,0,0.7); backdrop-filter: blur(20px); border: 1px solid rgba(255,150,50,0.15); }
+        .glass-hover:hover { background: rgba(0,0,0,0.8); border-color: rgba(255,150,50,0.3); }
         .gradient-border { position: relative; }
         .gradient-border::before { content: ''; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; background: linear-gradient(135deg, rgba(249,115,22,0.4), rgba(234,88,12,0.4), rgba(194,65,12,0.4)); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
         .gradient-border:hover::before { opacity: 1; }
@@ -423,10 +423,10 @@ SENsus_HTML = """<!DOCTYPE html>
                 <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-orange-500/20">P</div>
                 <div>
                     <h1 class="text-lg font-bold text-white tracking-tight">PLUVIO</h1>
-                    <p class="text-[11px] text-gray-500 font-medium tracking-wide uppercase">Sensus BMN Dashboard</p>
+                    <p class="text-[11px] text-gray-400 font-medium tracking-wide uppercase">Sensus BMN Dashboard</p>
                 </div>
             </div>
-            <div id="lastUpdated" class="text-xs text-gray-600 hidden sm:block"></div>
+            <div id="lastUpdated" class="text-xs text-gray-400 hidden sm:block"></div>
         </div>
     </header>
 
@@ -436,7 +436,7 @@ SENsus_HTML = """<!DOCTYPE html>
         <div class="text-center mb-10 fade-up">
             <h2 class="text-3xl sm:text-4xl font-extrabold text-white mb-3 tracking-tight">                    Sensus <span class="bg-gradient-to-r from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent">BMN</span>
             </h2>
-            <p class="text-gray-500 text-sm max-w-lg mx-auto">Perbandingan data <span class="text-gray-400">databmnbuku.csv</span> dengan Google Sheet sensus & inventarisasi</p>
+            <p class="text-gray-300 text-sm max-w-lg mx-auto">Perbandingan data <span class="text-orange-400">databmnbuku.csv</span> dengan Google Sheet sensus & inventarisasi</p>
         </div>
 
         <!-- Stats -->
@@ -445,9 +445,9 @@ SENsus_HTML = """<!DOCTYPE html>
         <!-- Search -->
         <div id="searchWrap" class="mb-8 hidden">
             <div class="relative max-w-xl mx-auto">
-                <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                 <input type="text" id="searchInput" class="w-full pl-12 pr-4 py-3.5 rounded-2xl glass text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/40 transition-all" placeholder="Cari NUP atau Judul buku...">
-                <span id="searchCount" class="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-gray-600 hidden"></span>
+                <span id="searchCount" class="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-gray-400 hidden"></span>
             </div>
         </div>
 
@@ -455,7 +455,7 @@ SENsus_HTML = """<!DOCTYPE html>
         <div id="content">
             <div class="flex flex-col items-center justify-center py-24">
                 <div class="w-12 h-12 border-3 border-orange-500/20 border-t-orange-500 rounded-full animate-spin mb-4"></div>
-                <p class="text-gray-500 text-sm">Memuat data sensus...</p>
+                <p class="text-gray-300 text-sm">Memuat data sensus...</p>
             </div>
         </div>
     </main>
@@ -489,19 +489,19 @@ SENsus_HTML = """<!DOCTYPE html>
 
         // ── Renderers ──
         function renderGroups(groups, catId) {
-            if (groups.length === 0) return '<p class="text-gray-600 text-sm py-4 text-center">Tidak ada data</p>';
+            if (groups.length === 0) return '<p class="text-gray-400 text-sm py-4 text-center">Tidak ada data</p>';
             return groups.map((g, gi) => `
                 <div class="mb-3" data-group="${catId}-${g.name}">
                     <button onclick="toggleGroup(this)" class="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-white/[0.02] hover:bg-white/[0.05] transition-all text-left group">
                         <div class="flex items-center gap-3">
-                            <svg class="w-4 h-4 text-gray-500 group-hover:text-orange-400 transition-transform chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            <svg class="w-4 h-4 text-gray-400 group-hover:text-orange-400 transition-transform chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                             <span class="text-sm font-semibold text-orange-300/80">${escapeHtml(g.name)}</span>
                         </div>
-                        <span class="text-xs text-gray-600 bg-white/5 px-2.5 py-1 rounded-full">${g.items.length} item</span>
+                        <span class="text-xs text-gray-400 bg-white/5 px-2.5 py-1 rounded-full">${g.items.length} item</span>
                     </button>
                     <div class="hidden mt-2 ml-4 overflow-x-auto scrollbar-thin">
                         <table class="w-full text-sm">
-                            <thead><tr class="text-left text-[11px] text-gray-600 uppercase tracking-wider">
+                            <thead><tr class="text-left text-[11px] text-gray-400 uppercase tracking-wider">
                                 <th class="pb-2 pl-4 w-12">#</th>
                                 <th class="pb-2 w-28">NUP</th>
                                 <th class="pb-2">Judul</th>
@@ -509,7 +509,7 @@ SENsus_HTML = """<!DOCTYPE html>
                             </tr></thead>
                             <tbody>${g.items.map((item, i) => `
                                 <tr class="border-t border-white/[0.03] hover:bg-white/[0.02]">
-                                    <td class="py-2 pl-4 text-gray-600 text-xs">${i + 1}</td>
+                                    <td class="py-2 pl-4 text-gray-400 text-xs">${i + 1}</td>
                                     <td class="py-2 font-mono text-orange-400/80 font-semibold text-xs whitespace-nowrap">${escapeHtml(item.nup)}</td>
                                     <td class="py-2 pr-4 text-gray-300 text-xs">${escapeHtml(item.judul.length > 65 ? item.judul.substring(0, 65) + '…' : item.judul)}</td>
                                     <td class="py-2 text-blue-400/60 text-xs font-mono whitespace-nowrap">${escapeHtml(item.kodifikasi)}</td>
@@ -570,7 +570,7 @@ SENsus_HTML = """<!DOCTYPE html>
             return `
                 <button onclick="scrollToSection('${id}')" class="glass glass-hover gradient-border rounded-2xl p-5 text-center transition-all duration-300 hover:scale-[1.02] hover:-translate-y-1 fade-up" style="animation-delay:${delay}ms">
                     <div class="text-3xl sm:text-4xl font-extrabold mb-1" style="color:${color}">${count.toLocaleString()}</div>
-                    <div class="text-[11px] text-gray-500 font-medium uppercase tracking-wider">${icon} ${label}</div>
+                    <div class="text-[11px] text-gray-400 font-medium uppercase tracking-wider">${icon} ${label}</div>
                 </button>`;
         }
 
@@ -578,7 +578,7 @@ SENsus_HTML = """<!DOCTYPE html>
             return `
                 <div class="glass rounded-2xl p-5 text-center fade-up" style="animation-delay:${delay}ms">
                     <div class="text-3xl sm:text-4xl font-extrabold mb-1 bg-gradient-to-r from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent">${count.toLocaleString()}</div>
-                    <div class="text-[11px] text-gray-500 font-medium uppercase tracking-wider">📊 Total Data</div>
+                    <div class="text-[11px] text-gray-400 font-medium uppercase tracking-wider">📊 Total Data</div>
                 </div>`;
         }
 
@@ -590,12 +590,12 @@ SENsus_HTML = """<!DOCTYPE html>
                             <span class="text-2xl">${icon}</span>
                             <div>
                                 <h3 class="text-base font-bold text-white">${title}</h3>
-                                <p class="text-xs text-gray-500 mt-0.5">${count.toLocaleString()} item</p>
+                                <p class="text-xs text-gray-400 mt-0.5">${count.toLocaleString()} item</p>
                             </div>
                         </div>
                         <div class="flex items-center gap-3">
                             <span class="text-xs font-bold px-3 py-1.5 rounded-full ${colorClass}">${count.toLocaleString()}</span>
-                            <svg class="w-5 h-5 text-gray-500 chevron transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            <svg class="w-5 h-5 text-gray-400 chevron transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                         </div>
                     </button>
                     <div id="${catId}-body" class="hidden px-6 pb-6">
