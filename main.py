@@ -512,7 +512,7 @@ SENsus_HTML = """<!DOCTYPE html>
                                     <td class="py-2 pl-4 text-gray-400 text-xs">${i + 1}</td>
                                     <td class="py-2 font-mono text-orange-400/80 font-semibold text-xs whitespace-nowrap">${escapeHtml(item.nup)}</td>
                                     <td class="py-2 pr-4 text-gray-300 text-xs">${escapeHtml(item.judul.length > 65 ? item.judul.substring(0, 65) + '…' : item.judul)}</td>
-                                    <td class="py-2 text-blue-400/60 text-xs font-mono whitespace-nowrap">${escapeHtml(item.kodifikasi)}</td>
+                                    <td class="py-2 text-orange-300 text-xs font-mono font-semibold whitespace-nowrap">${escapeHtml(item.kodifikasi)}</td>
                                 </tr>`).join('')}
                             </tbody>
                         </table>
