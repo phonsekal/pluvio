@@ -212,7 +212,8 @@ def _download_excel(file_id):
 def _parse_excel_file(path):
     """Parse Excel file with openpyxl.
     
-    Expected columns: E=NUP, Y=Status Inventarisasi
+    Expected columns: E=NUP, F=Nama Barang, Y=Status Inventarisasi
+    Filter: only rows where Nama Barang (col F) = 'Monografi'
     NUP from openpyxl may come as float (e.g. '3.0'), strip to int.
     """
     try:
@@ -227,16 +228,24 @@ def _parse_excel_file(path):
         headers = [str(h).strip().lower() if h else "" for h in rows[0]]
         nup_idx = None
         status_idx = None
+        nama_barang_idx = None
         for i, h in enumerate(headers):
             if "nup" in h:
                 nup_idx = i
             if "inventarisasi" in h or h == "status inventarisasi":
                 status_idx = i
+            if "nama barang" in h or h == "nama barang":
+                nama_barang_idx = i
         if nup_idx is None:
             return []
         items = []
         for row in rows[1:]:
             vals = list(row) + [None] * max(0, len(headers) - len(row))
+            # Filter: hanya Monografi
+            if nama_barang_idx is not None and nama_barang_idx < len(vals):
+                nb = str(vals[nama_barang_idx]).strip().lower() if vals[nama_barang_idx] else ""
+                if nb != "monografi":
+                    continue
             nup_raw = vals[nup_idx]
             if nup_raw is None:
                 continue
