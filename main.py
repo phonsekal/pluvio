@@ -999,20 +999,18 @@ RAK_HTML = """<!DOCTYPE html>
                     if (search) {
                         filtered = items.filter(it => it.nup.toLowerCase().includes(search) || it.judul.toLowerCase().includes(search) || name.toLowerCase().includes(search));
                     }
-                    // Sort by kodifikasi (extract numeric value)
+                    // Sort by kodifikasi: prefix letter → first number (numeric)
                     filtered = [...filtered].sort((a, b) => {
                         const ka = (a.kodifikasi || '').toUpperCase();
                         const kb = (b.kodifikasi || '').toUpperCase();
                         // Extract prefix letter(s)
                         const pa = ka.replace(/[^A-Z].*$/, '');
                         const pb = kb.replace(/[^A-Z].*$/, '');
-                        if (pa !== pb) return pa.localeCompare(pb);
-                        // Extract all digits and combine
-                        const da = (ka.match(/\d+/g) || []).join('');
-                        const db = (kb.match(/\d+/g) || []).join('');
-                        // Pad shorter with zeros for comparison
-                        const maxLen = Math.max(da.length, db.length);
-                        return da.padStart(maxLen, '0').localeCompare(db.padStart(maxLen, '0'));
+                        if (pa !== pb) return pa < pb ? -1 : pa > pb ? 1 : 0;
+                        // Extract first number after prefix
+                        const na = parseFloat((ka.substring(pa.length).match(/[\d.]+/) || ['0'])[0]) || 0;
+                        const nb = parseFloat((kb.substring(pb.length).match(/[\d.]+/) || ['0'])[0]) || 0;
+                        return na - nb;
                     });
                     if (filtered.length > 0) {
                         itemsHtml = `<div class="mt-3 ml-4 overflow-x-auto scrollbar-thin max-h-64 overflow-y-auto">
