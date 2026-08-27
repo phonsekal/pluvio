@@ -24,6 +24,7 @@ GDRIVE_CREDS_JSON = os.environ.get("GDRIVE_CREDS_JSON", "")
 CREDS_PATH = Path(__file__).parent / "gdrive-creds.json"
 # Also check for existing service account JSON files
 CREDS_GLOB = list(Path(__file__).parent.glob("*.json"))
+RAK_CONFIG_PATH = Path(__file__).parent / "rak_config.json"
 
 
 def _get_gdrive_creds():
@@ -300,6 +301,154 @@ def read_inventory():
     return []
 
 
+# ── Rak Config ─────────────────────────────────────────────────────
+def load_rak_config():
+    """Load rak definitions from JSON file."""
+    try:
+        with open(RAK_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading rak config: {e}")
+        return []
+
+
+def _parse_kodifikasi_numeric(kodifikasi: str):
+    """Extract prefix letter and numeric value from a kodifikasi string.
+    
+    For single-number codes like 'U 001.3', use as-is.
+    For multi-part codes like 'U 899 210 72 MAH' or 'PB 398.209 598 48 JAY c',
+    extract only the FIRST number (which is the classification code).
+    
+    Examples:
+      'U 001.3' → ('U', 1.3)
+      'K 899.213' → ('K', 899.213)
+      'U 899 210 72 MAH' → ('U', 899.21072)
+      'PB 398.209' → ('PB', 398.209)
+      'PB 398.209 598 48 JAY c' → ('PB', 398.209)
+    """
+    if not kodifikasi or kodifikasi == "-":
+        return None, None
+    # Extract prefix: first letter(s)
+    prefix = ""
+    rest = ""
+    for i, c in enumerate(kodifikasi):
+        if c.isalpha():
+            prefix += c
+        else:
+            rest = kodifikasi[i:].strip()
+            break
+    if not prefix:
+        return None, None
+    # Extract only the first number from rest
+    first_num_match = re.match(r'(\d+(?:\.\d+)?)', rest)
+    if not first_num_match:
+        return prefix, None
+    first_num = first_num_match.group(1)
+    # For multi-part codes like '899 210 72', check if there are more
+    # number parts that should be combined (no existing decimal)
+    remaining = rest[first_num_match.end():].strip()
+    if '.' not in first_num:
+        # Multi-part without decimal: combine next number parts
+        # e.g., '899 210 72 MAH' → '89921072'
+        extra_nums = re.findall(r'^(\d+)', remaining)
+        all_digits = first_num
+        temp_remaining = remaining
+        for en in extra_nums:
+            # Only combine if combined length would give 3+ digit main part
+            combined = all_digits + en
+            if len(combined) <= 8:  # Reasonable max for DDC code
+                all_digits += en
+                temp_remaining = temp_remaining[len(en):].strip()
+            else:
+                break
+        try:
+            if len(all_digits) > 3:
+                main_part = all_digits[:3]
+                decimal_part = all_digits[3:]
+                val = float(f"{main_part}.{decimal_part}")
+            else:
+                val = float(all_digits)
+        except ValueError:
+            return prefix, None
+        return prefix, val
+    else:
+        # Already has decimal: use as-is
+        try:
+            return prefix, float(first_num)
+        except ValueError:
+            return prefix, None
+
+
+def match_rak(kodifikasi: str, rak_config: list):
+    """Find which shelf a kodifikasi belongs to."""
+    prefix, numeric = _parse_kodifikasi_numeric(kodifikasi)
+    if prefix is None or numeric is None:
+        return None
+    for rak in rak_config:
+        if rak["prefix"].upper() == prefix.upper():
+            if rak["start"] <= numeric <= rak["end"]:
+                return rak["name"]
+    return None
+
+
+def get_rak_progress(csv_items, sheet_items, inventory_items, rak_config):
+    """Categorize items by shelf and status."""
+    # Build lookups
+    sheet_lookup = {}
+    for si in sheet_items:
+        sheet_lookup[si["nup"]] = si
+    inventory_ditemukan = set()
+    for inv in inventory_items:
+        if inv.get("status", "").strip() == "Ditemukan":
+            nup = inv.get("nup", "").strip()
+            if nup:
+                inventory_ditemukan.add(nup)
+
+    # Initialize rak buckets
+    rak_names = [r["name"] for r in rak_config]
+    rak_map = {r["name"]: r for r in rak_config}
+    
+    result = {}
+    for name in rak_names:
+        result[name] = {
+            "config": rak_map[name],
+            "belum_ditemukan": [],
+            "ditemukan_belum_sensus": [],
+            "sudah_sensus_belum_kirim": [],
+            "sensus_ditemukan": [],
+        }
+    unmatched = []
+
+    for ci in csv_items:
+        nup = ci["nup"]
+        judul = ci["judul"]
+        kodifikasi = ci["kodifikasi"]
+        rak_name = match_rak(kodifikasi, rak_config)
+
+        # Determine category
+        cat = None
+        if nup in sheet_lookup:
+            si = sheet_lookup[nup]
+            if si["status_ditemukan"]:
+                cat = "sensus_ditemukan"
+            else:
+                cat = "ditemukan_belum_sensus"
+        else:
+            if nup in inventory_ditemukan:
+                cat = "sudah_sensus_belum_kirim"
+            else:
+                cat = "belum_ditemukan"
+
+        item = {"nup": nup, "judul": judul, "kodifikasi": kodifikasi}
+
+        if rak_name and rak_name in result:
+            result[rak_name][cat].append(item)
+        else:
+            unmatched.append({**item, "category": cat})
+
+    return {"raks": result, "unmatched": unmatched}
+
+
 # ── Helpers ─────────────────────────────────────────────────────────
 def get_kodifikasi_group(kodifikasi: str) -> str:
     if not kodifikasi or kodifikasi == "-":
@@ -435,7 +584,10 @@ SENsus_HTML = """<!DOCTYPE html>
                     <p class="text-[11px] text-gray-400 font-medium tracking-wide uppercase">Sensus BMN Dashboard</p>
                 </div>
             </div>
-            <div id="lastUpdated" class="text-xs text-gray-400 hidden sm:block"></div>
+            <div class="flex items-center gap-3">
+                <div id="lastUpdated" class="text-xs text-gray-400 hidden sm:block"></div>
+                <a href="/rak" class="text-xs text-orange-400 hover:text-orange-300 font-medium px-3 py-1.5 rounded-lg border border-orange-500/20 hover:border-orange-500/40 transition-colors">📊 Progress per Rak</a>
+            </div>
         </div>
     </header>
 
@@ -664,6 +816,263 @@ SENsus_HTML = """<!DOCTYPE html>
 </html>"""
 
 
+# ── Rak HTML Template ──────────────────────────────────────────────
+RAK_HTML = """<!DOCTYPE html>
+<html lang="id" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Progress per Rak - PLUVIO</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+                    colors: {
+                        dark: { 900: '#1a0f00', 800: '#2d1a00', 700: '#3d2500' },
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        .glass { background: rgba(0,0,0,0.7); backdrop-filter: blur(20px); border: 1px solid rgba(255,150,50,0.15); }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-up { animation: fadeUp 0.5s ease-out forwards; }
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+    </style>
+</head>
+<body class="bg-dark-900 text-gray-200 min-h-screen">
+    <!-- Header -->
+    <header class="sticky top-0 z-50 glass border-b border-white/5">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <a href="/" class="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-orange-500/20 hover:scale-105 transition-transform">P</a>
+                <div>
+                    <h1 class="text-lg font-bold text-white tracking-tight">PLUVIO</h1>
+                    <p class="text-[11px] text-gray-400 font-medium tracking-wide uppercase">Progress per Rak</p>
+                </div>
+            </div>
+            <a href="/" class="text-xs text-orange-400 hover:text-orange-300 font-medium px-3 py-1.5 rounded-lg border border-orange-500/20 hover:border-orange-500/40 transition-colors">← Sensus BMN</a>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        <div class="text-center mb-10 fade-up">
+            <h2 class="text-3xl sm:text-4xl font-extrabold text-white mb-3 tracking-tight">
+                Progress <span class="bg-gradient-to-r from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent">per Rak</span>
+            </h2>
+            <p class="text-gray-300 text-sm max-w-lg mx-auto">Status sensus BMN berdasarkan <span class="text-orange-400">kelompok rak</span> yang sudah didefinisikan</p>
+        </div>
+
+        <!-- Filter Tabs -->
+        <div class="flex flex-wrap justify-center gap-2 mb-8 fade-up" style="animation-delay:100ms">
+            <button onclick="filterStatus('all')" id="tab-all" class="filter-tab active px-4 py-2 rounded-xl text-sm font-medium transition-all bg-orange-500 text-white">Semua</button>
+            <button onclick="filterStatus('belum_ditemukan')" id="tab-bs" class="filter-tab px-4 py-2 rounded-xl text-sm font-medium transition-all bg-white/5 text-gray-400 hover:bg-white/10">❌ Belum Ditemukan</button>
+            <button onclick="filterStatus('ditemukan_belum_sensus')" id="tab-sbd" class="filter-tab px-4 py-2 rounded-xl text-sm font-medium transition-all bg-white/5 text-gray-400 hover:bg-white/10">⚠️ Ditemukan, Belum Sensus</button>
+            <button onclick="filterStatus('sudah_sensus_belum_kirim')" id="tab-ds" class="filter-tab px-4 py-2 rounded-xl text-sm font-medium transition-all bg-white/5 text-gray-400 hover:bg-white/10">📋 Sudah Sensus, Belum Kirim</button>
+            <button onclick="filterStatus('sensus_ditemukan')" id="tab-sd" class="filter-tab px-4 py-2 rounded-xl text-sm font-medium transition-all bg-white/5 text-gray-400 hover:bg-white/10">✅ Sensus & Ditemukan</button>
+        </div>
+
+        <!-- Search -->
+        <div class="mb-8 fade-up" style="animation-delay:150ms">
+            <div class="relative max-w-xl mx-auto">
+                <svg class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                <input type="text" id="searchInput" class="w-full pl-12 pr-4 py-3.5 rounded-2xl glass text-white placeholder-gray-500 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/40 transition-all" placeholder="Cari NUP, Judul, atau Rak...">
+            </div>
+        </div>
+
+        <!-- Content -->
+        <div id="content">
+            <div class="flex flex-col items-center justify-center py-24">
+                <div class="w-12 h-12 border-3 border-orange-500/20 border-t-orange-500 rounded-full animate-spin mb-4"></div>
+                <p class="text-gray-300 text-sm">Memuat data rak...</p>
+            </div>
+        </div>
+    </main>
+
+    <footer class="text-center py-8 text-xs text-gray-700">Built with FastAPI & deployed on Vercel</footer>
+
+    <script>
+        let rakData = null;
+        let currentFilter = 'all';
+
+        function escapeHtml(s) {
+            const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+        }
+
+        function getStatusColor(cat) {
+            const colors = {
+                belum_ditemukan: { bg: 'bg-red-500/15', text: 'text-red-400', dot: 'bg-red-500' },
+                ditemukan_belum_sensus: { bg: 'bg-yellow-500/15', text: 'text-yellow-400', dot: 'bg-yellow-500' },
+                sudah_sensus_belum_kirim: { bg: 'bg-orange-500/15', text: 'text-orange-400', dot: 'bg-orange-500' },
+                sensus_ditemukan: { bg: 'bg-emerald-500/15', text: 'text-emerald-400', dot: 'bg-emerald-500' },
+            };
+            return colors[cat] || colors.belum_ditemukan;
+        }
+
+        function getStatusLabel(cat) {
+            const labels = {
+                belum_ditemukan: '❌ Belum Ditemukan',
+                ditemukan_belum_sensus: '⚠️ Ditemukan, Belum Sensus',
+                sudah_sensus_belum_kirim: '📋 Sudah Sensus, Belum Kirim',
+                sensus_ditemukan: '✅ Sensus & Ditemukan',
+            };
+            return labels[cat] || cat;
+        }
+
+        function filterStatus(cat) {
+            currentFilter = cat;
+            document.querySelectorAll('.filter-tab').forEach(t => {
+                t.className = 'filter-tab px-4 py-2 rounded-xl text-sm font-medium transition-all bg-white/5 text-gray-400 hover:bg-white/10';
+            });
+            const activeTab = document.getElementById('tab-' + (cat === 'all' ? 'all' : cat.split('_')[0] === 'belum' ? 'bs' : cat === 'ditemukan_belum_sensus' ? 'sbd' : cat === 'sudah_sensus_belum_kirim' ? 'ds' : 'sd'));
+            if (cat === 'all') {
+                document.getElementById('tab-all').className = 'filter-tab px-4 py-2 rounded-xl text-sm font-medium transition-all bg-orange-500 text-white';
+            } else {
+                const map = { belum_ditemukan: 'bs', ditemukan_belum_sensus: 'sbd', sudah_sensus_belum_kirim: 'ds', sensus_ditemukan: 'sd' };
+                const el = document.getElementById('tab-' + map[cat]);
+                if (el) el.className = 'filter-tab px-4 py-2 rounded-xl text-sm font-medium transition-all bg-orange-500 text-white';
+            }
+            renderRaks();
+        }
+
+        function renderRaks() {
+            if (!rakData) return;
+            const raks = rakData.raks;
+            const search = document.getElementById('searchInput').value.toLowerCase().trim();
+            const container = document.getElementById('content');
+
+            // Sort raks by total items (desc)
+            let sorted = Object.entries(raks).map(([name, data]) => {
+                const total = data.belum_ditemukan.length + data.ditemukan_belum_sensus.length + data.sudah_sensus_belum_kirim.length + data.sensus_ditemukan.length;
+                return { name, data, total };
+            }).filter(r => r.total > 0);
+
+            sorted.sort((a, b) => b.total - a.total);
+
+            let html = '<div class="grid gap-4">';
+
+            sorted.forEach((rak, idx) => {
+                const { name, data, total } = rak;
+                const cfg = data.config;
+                const cats = ['belum_ditemukan', 'ditemukan_belum_sensus', 'sudah_sensus_belum_kirim', 'sensus_ditemukan'];
+
+                // Build bar segments
+                const segments = cats.map(cat => {
+                    const count = data[cat].length;
+                    if (count === 0) return '';
+                    const colors = { belum_ditemukan: '#f87171', ditemukan_belum_sensus: '#facc15', sudah_sensus_belum_kirim: '#fb923c', sensus_ditemukan: '#4ade80' };
+                    const pct = total > 0 ? (count / total * 100) : 0;
+                    return `<div style="width:${pct}%;background:${colors[cat]}" class="h-full rounded-sm min-w-[2px]" title="${getStatusLabel(cat)}: ${count}"></div>`;
+                }).join('');
+
+                // Build items for active filter
+                let itemsHtml = '';
+                if (currentFilter !== 'all') {
+                    const items = data[currentFilter] || [];
+                    let filtered = items;
+                    if (search) {
+                        filtered = items.filter(it => it.nup.toLowerCase().includes(search) || it.judul.toLowerCase().includes(search) || name.toLowerCase().includes(search));
+                    }
+                    if (filtered.length > 0) {
+                        itemsHtml = `<div class="mt-3 ml-4 overflow-x-auto scrollbar-thin max-h-64 overflow-y-auto">
+                            <table class="w-full text-sm">
+                                <thead><tr class="text-left text-[11px] text-gray-400 uppercase tracking-wider">
+                                    <th class="pb-2 pl-3 w-10">#</th>
+                                    <th class="pb-2 w-24">NUP</th>
+                                    <th class="pb-2">Judul</th>
+                                    <th class="pb-2 w-24">Kodifikasi</th>
+                                </tr></thead>
+                                <tbody>${filtered.map((it, i) => `
+                                    <tr class="border-t border-white/[0.03] hover:bg-white/[0.02]">
+                                        <td class="py-1.5 pl-3 text-gray-500 text-xs">${i+1}</td>
+                                        <td class="py-1.5 font-mono text-orange-400/80 font-semibold text-xs whitespace-nowrap">${escapeHtml(it.nup)}</td>
+                                        <td class="py-1.5 pr-3 text-gray-300 text-xs">${escapeHtml(it.judul.length > 60 ? it.judul.substring(0,60)+'…' : it.judul)}</td>
+                                        <td class="py-1.5 text-orange-300 text-xs font-mono">${escapeHtml(it.kodifikasi)}</td>
+                                    </tr>`).join('')}
+                                </tbody>
+                            </table>
+                        </div>`;
+                    } else {
+                        itemsHtml = `<div class="mt-2 text-center text-xs text-gray-500">Tidak ada item</div>`;
+                    }
+                }
+
+                // Filter items for search match
+                if (currentFilter === 'all' && search) {
+                    const allItems = [...data.belum_ditemukan, ...data.ditemukan_belum_sensus, ...data.sudah_sensus_belum_kirim, ...data.sensus_ditemukan];
+                    const matchCount = allItems.filter(it => it.nup.toLowerCase().includes(search) || it.judul.toLowerCase().includes(search)).length;
+                    if (matchCount === 0) return;
+                }
+
+                html += `
+                <div class="glass rounded-2xl overflow-hidden fade-up" style="animation-delay:${idx * 50}ms">
+                    <button onclick="toggleRak(this)" class="w-full flex items-center gap-4 px-5 py-4 hover:bg-white/[0.02] transition-colors text-left">
+                        <svg class="w-4 h-4 text-gray-400 chevron transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-3">
+                                <span class="text-base font-bold text-white">${escapeHtml(name)}</span>
+                                <span class="text-[10px] text-gray-500 px-2 py-0.5 rounded-full bg-white/5">${escapeHtml(cfg.category)}</span>
+                                <span class="text-[10px] text-gray-500 font-mono">${escapeHtml(cfg.prefix)} ${cfg.start} – ${cfg.end}</span>
+                            </div>
+                            <div class="flex gap-2 mt-1.5">
+                                ${data.sensus_ditemukan.length ? `<span class="text-[10px] text-emerald-400">✅ ${data.sensus_ditemukan.length}</span>` : ''}
+                                ${data.ditemukan_belum_sensus.length ? `<span class="text-[10px] text-yellow-400">⚠️ ${data.ditemukan_belum_sensus.length}</span>` : ''}
+                                ${data.sudah_sensus_belum_kirim.length ? `<span class="text-[10px] text-orange-400">📋 ${data.sudah_sensus_belum_kirim.length}</span>` : ''}
+                                ${data.belum_ditemukan.length ? `<span class="text-[10px] text-red-400">❌ ${data.belum_ditemukan.length}</span>` : ''}
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <div class="w-32 h-2 rounded-full bg-white/5 overflow-hidden hidden sm:flex gap-px">${segments}</div>
+                            <span class="text-sm font-bold text-orange-400 w-10 text-right">${total}</span>
+                        </div>
+                    </button>
+                    <div class="rak-items hidden px-5 pb-4">${itemsHtml}</div>
+                </div>`;
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function toggleRak(btn) {
+            const items = btn.nextElementSibling;
+            const chevron = btn.querySelector('.chevron');
+            items.classList.toggle('hidden');
+            chevron.style.transform = items.classList.contains('hidden') ? '' : 'rotate(90deg)';
+        }
+
+        document.getElementById('searchInput')?.addEventListener('input', renderRaks);
+
+        async function loadData() {
+            try {
+                const resp = await fetch('/api/rak');
+                if (!resp.ok) throw new Error('API error');
+                rakData = await resp.json();
+                renderRaks();
+            } catch(e) {
+                document.getElementById('content').innerHTML = `
+                    <div class="text-center py-16">
+                        <div class="text-4xl mb-4">❌</div>
+                        <p class="text-red-400 font-medium">Gagal memuat data</p>
+                        <p class="text-gray-600 text-sm mt-2">${escapeHtml(e.message)}</p>
+                        <button onclick="loadData()" class="mt-4 px-6 py-2.5 rounded-xl bg-orange-500/20 text-orange-400 text-sm font-medium hover:bg-orange-500/30 transition-colors">Coba Lagi</button>
+                    </div>`;
+            }
+        }
+        loadData();
+    </script>
+</body>
+</html>"""
+
+
 # ── Routes ──────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -675,12 +1084,26 @@ async def sensus_page():
     return SENsus_HTML
 
 
+@app.get("/rak", response_class=HTMLResponse)
+async def rak_page():
+    return RAK_HTML
+
+
 @app.get("/api/sensus")
 async def get_sensus_data():
     csv_items = read_csv_local()
     sheet_items = await read_google_sheet()
     inventory_items = read_inventory()
     return compare_data(csv_items, sheet_items, inventory_items)
+
+
+@app.get("/api/rak")
+async def get_rak_data():
+    csv_items = read_csv_local()
+    sheet_items = await read_google_sheet()
+    inventory_items = read_inventory()
+    rak_config = load_rak_config()
+    return get_rak_progress(csv_items, sheet_items, inventory_items, rak_config)
 
 
 @app.get("/api/profile")
