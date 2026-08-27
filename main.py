@@ -949,13 +949,31 @@ RAK_HTML = """<!DOCTYPE html>
             const search = document.getElementById('searchInput').value.toLowerCase().trim();
             const container = document.getElementById('content');
 
-            // Sort raks by total items (desc)
+            // Sort raks by kodifikasi order (prefix + numeric)
+            const prefixOrder = {'D':1,'K':2,'L':3,'M':4,'PB':5,'R':6,'S':7,'U':8};
             let sorted = Object.entries(raks).map(([name, data]) => {
                 const total = data.belum_ditemukan.length + data.ditemukan_belum_sensus.length + data.sudah_sensus_belum_kirim.length + data.sensus_ditemukan.length;
-                return { name, data, total };
+                const prefix = (data.config?.prefix || 'ZZZ').toUpperCase();
+                const numeric = data.config?.start || 0;
+                const prefixRank = prefixOrder[prefix] || 99;
+                return { name, data, total, prefixRank, numeric };
             }).filter(r => r.total > 0);
 
-            sorted.sort((a, b) => b.total - a.total);
+            // Also add unmatched items as a "Lainnya" group
+            if (rakData.unmatched && rakData.unmatched.length > 0) {
+                const umItems = rakData.unmatched;
+                const umData = {
+                    config: { prefix: 'ZZZ', start: 0, end: 999, category: 'Tanpa Rak' },
+                    belum_ditemukan: umItems.filter(i => i.category === 'belum_ditemukan'),
+                    ditemukan_belum_sensus: umItems.filter(i => i.category === 'ditemukan_belum_sensus'),
+                    sudah_sensus_belum_kirim: umItems.filter(i => i.category === 'sudah_sensus_belum_kirim'),
+                    sensus_ditemukan: umItems.filter(i => i.category === 'sensus_ditemukan'),
+                };
+                const umTotal = umItems.length;
+                if (umTotal > 0) sorted.push({ name: 'Lainnya (Tanpa Rak)', data: umData, total: umTotal, prefixRank: 100, numeric: 0 });
+            }
+
+            sorted.sort((a, b) => a.prefixRank - b.prefixRank || a.numeric - b.numeric);
 
             let html = '<div class="grid gap-4">';
 
