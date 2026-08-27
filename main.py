@@ -973,7 +973,7 @@ RAK_HTML = """<!DOCTYPE html>
                 if (umTotal > 0) sorted.push({ name: 'Lainnya (Tanpa Rak)', data: umData, total: umTotal, prefixRank: 100, numeric: 0 });
             }
 
-            sorted.sort((a, b) => a.prefixRank - b.prefixRank || a.numeric - b.numeric);
+            sorted.sort((a, b) => b.data.belum_ditemukan.length - a.data.belum_ditemukan.length || a.prefixRank - b.prefixRank || a.numeric - b.numeric);
 
             let html = '<div class="grid gap-4">';
 
