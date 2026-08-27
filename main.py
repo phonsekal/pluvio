@@ -449,6 +449,66 @@ def get_rak_progress(csv_items, sheet_items, inventory_items, rak_config):
     return {"raks": result, "unmatched": unmatched}
 
 
+def get_kodifikasi_summary(csv_items, sheet_items, inventory_items):
+    """Group items by first 3 digits of kodifikasi and count belum_ditemukan."""
+    sheet_lookup = {}
+    for si in sheet_items:
+        sheet_lookup[si["nup"]] = si
+    inventory_ditemukan = set()
+    for inv in inventory_items:
+        if inv.get("status", "").strip() == "Ditemukan":
+            nup = inv.get("nup", "").strip()
+            if nup:
+                inventory_ditemukan.add(nup)
+
+    groups = defaultdict(lambda: {"belum_ditemukan": 0, "ditemukan_belum_sensus": 0, "sudah_sensus_belum_kirim": 0, "sensus_ditemukan": 0, "total": 0})
+
+    for ci in csv_items:
+        nup = ci["nup"]
+        kodifikasi = ci["kodifikasi"]
+        # Extract prefix + first 3 digits
+        key = get_kodifikasi_3digit(kodifikasi)
+
+        # Determine category
+        if nup in sheet_lookup:
+            si = sheet_lookup[nup]
+            if si["status_ditemukan"]:
+                groups[key]["sensus_ditemukan"] += 1
+            else:
+                groups[key]["ditemukan_belum_sensus"] += 1
+        else:
+            if nup in inventory_ditemukan:
+                groups[key]["sudah_sensus_belum_kirim"] += 1
+            else:
+                groups[key]["belum_ditemukan"] += 1
+        groups[key]["total"] += 1
+
+    # Sort by belum_ditemukan desc
+    result = []
+    for key, counts in groups.items():
+        result.append({"kode": key, **counts})
+    result.sort(key=lambda x: -x["belum_ditemukan"])
+    return result
+
+
+def get_kodifikasi_3digit(kodifikasi: str) -> str:
+    """Extract prefix + first 3-digit code from kodifikasi.
+    E.g. 'K 899 213 SAS k' → 'K 899', 'PB 499 218' → 'PB 499'
+    """
+    if not kodifikasi or kodifikasi == "-":
+        return "Tanpa Kodifikasi"
+    ka = kodifikasi.upper()
+    prefix = re.sub(r'[^A-Z].*$', '', ka)
+    if not prefix:
+        return "Tanpa Kodifikasi"
+    # Find first number after prefix
+    rest = ka[len(prefix):].strip()
+    nums = re.findall(r'\d+', rest)
+    if not nums:
+        return prefix
+    return f"{prefix} {nums[0]}"
+
+
 # ── Helpers ─────────────────────────────────────────────────────────
 def get_kodifikasi_group(kodifikasi: str) -> str:
     if not kodifikasi or kodifikasi == "-":
@@ -888,6 +948,9 @@ RAK_HTML = """<!DOCTYPE html>
             </div>
         </div>
 
+        <!-- Kodifikasi Summary -->
+        <div id="kodSummary" class="mb-8 hidden"></div>
+
         <!-- Content -->
         <div id="content">
             <div class="flex flex-col items-center justify-center py-24">
@@ -1084,10 +1147,18 @@ RAK_HTML = """<!DOCTYPE html>
 
         async function loadData() {
             try {
-                const resp = await fetch('/api/rak');
-                if (!resp.ok) throw new Error('API error');
-                rakData = await resp.json();
+                const [rakResp, kodResp] = await Promise.all([
+                    fetch('/api/rak'),
+                    fetch('/api/kodifikasi')
+                ]);
+                if (!rakResp.ok) throw new Error('API error');
+                rakData = await rakResp.json();
                 renderRaks();
+                // Render kodifikasi summary
+                if (kodResp.ok) {
+                    const kodData = await kodResp.json();
+                    renderKodSummary(kodData);
+                }
             } catch(e) {
                 document.getElementById('content').innerHTML = `
                     <div class="text-center py-16">
@@ -1098,6 +1169,67 @@ RAK_HTML = """<!DOCTYPE html>
                     </div>`;
             }
         }
+
+        function renderKodSummary(data) {
+            if (!data || data.length === 0) return;
+            const container = document.getElementById('kodSummary');
+            let html = `
+            <div class="glass rounded-2xl overflow-hidden fade-up">
+                <button onclick="toggleKodSummary()" class="w-full flex items-center justify-between px-6 py-4 hover:bg-white/[0.02] transition-colors text-left">
+                    <div class="flex items-center gap-3">
+                        <span class="text-xl">📊</span>
+                        <div>
+                            <h3 class="text-sm font-bold text-white">Rekap per 3 Digit Kodifikasi</h3>
+                            <p class="text-[11px] text-gray-400">Jumlah belum ditemukan berdasarkan kode klasifikasi</p>
+                        </div>
+                    </div>
+                    <svg class="w-5 h-5 text-gray-400 chevron transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                </button>
+                <div id="kodSummaryBody" class="hidden px-6 pb-6">
+                    <div class="overflow-x-auto scrollbar-thin max-h-96 overflow-y-auto">
+                        <table class="w-full text-sm">
+                            <thead><tr class="text-left text-[11px] text-gray-400 uppercase tracking-wider border-b border-white/5">
+                                <th class="pb-2 pl-2 w-8">#</th>
+                                <th class="pb-2 font-semibold">Kode</th>
+                                <th class="pb-2 text-right font-semibold text-red-400">Belum Ditemukan</th>
+                                <th class="pb-2 text-right font-semibold text-yellow-400">Ditemukan, Belum Sensus</th>
+                                <th class="pb-2 text-right font-semibold text-orange-400">Sudah Sensus, Belum Kirim</th>
+                                <th class="pb-2 text-right font-semibold text-emerald-400">Sensus & Ditemukan</th>
+                                <th class="pb-2 text-right font-semibold text-white">Total</th>
+                            </tr></thead>
+                            <tbody>${data.map((row, i) => {
+                                const pct = row.total > 0 ? (row.belum_ditemukan / row.total * 100) : 0;
+                                const barColor = pct > 80 ? 'bg-red-500' : pct > 50 ? 'bg-yellow-500' : pct > 20 ? 'bg-orange-500' : 'bg-emerald-500';
+                                return `<tr class="border-t border-white/[0.03] hover:bg-white/[0.02]">
+                                    <td class="py-2 pl-2 text-gray-500 text-xs">${i+1}</td>
+                                    <td class="py-2 font-mono font-semibold text-orange-300 text-xs">${escapeHtml(row.kode)}</td>
+                                    <td class="py-2 text-right text-xs">
+                                        <div class="flex items-center justify-end gap-2">
+                                            <div class="w-16 h-1.5 rounded-full bg-white/5 overflow-hidden"><div class="h-full ${barColor} rounded-full" style="width:${pct}%"></div></div>
+                                            <span class="text-red-400 font-semibold w-10 text-right">${row.belum_ditemukan.toLocaleString()}</span>
+                                        </div>
+                                    </td>
+                                    <td class="py-2 text-right text-yellow-400 text-xs w-16">${row.ditemukan_belum_sensus.toLocaleString() || '-'}</td>
+                                    <td class="py-2 text-right text-orange-400 text-xs w-16">${row.sudah_sensus_belum_kirim.toLocaleString() || '-'}</td>
+                                    <td class="py-2 text-right text-emerald-400 text-xs w-16">${row.sensus_ditemukan.toLocaleString() || '-'}</td>
+                                    <td class="py-2 text-right text-white font-semibold text-xs w-16">${row.total.toLocaleString()}</td>
+                                </tr>`;
+                            }).join('')}</tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>`;
+            container.innerHTML = html;
+            container.classList.remove('hidden');
+        }
+
+        function toggleKodSummary() {
+            const body = document.getElementById('kodSummaryBody');
+            const chevron = document.querySelector('#kodSummary .chevron');
+            body.classList.toggle('hidden');
+            chevron.style.transform = body.classList.contains('hidden') ? '' : 'rotate(90deg)';
+        }
+
         loadData();
     </script>
 </body>
@@ -1135,6 +1267,14 @@ async def get_rak_data():
     inventory_items = read_inventory()
     rak_config = load_rak_config()
     return get_rak_progress(csv_items, sheet_items, inventory_items, rak_config)
+
+
+@app.get("/api/kodifikasi")
+async def get_kodifikasi_data():
+    csv_items = read_csv_local()
+    sheet_items = await read_google_sheet()
+    inventory_items = read_inventory()
+    return get_kodifikasi_summary(csv_items, sheet_items, inventory_items)
 
 
 @app.get("/api/profile")
