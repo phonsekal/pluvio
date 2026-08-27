@@ -999,6 +999,8 @@ RAK_HTML = """<!DOCTYPE html>
                     if (search) {
                         filtered = items.filter(it => it.nup.toLowerCase().includes(search) || it.judul.toLowerCase().includes(search) || name.toLowerCase().includes(search));
                     }
+                    // Sort by kodifikasi
+                    filtered = [...filtered].sort((a, b) => (a.kodifikasi || '').localeCompare(b.kodifikasi || '', undefined, {numeric: true}));
                     if (filtered.length > 0) {
                         itemsHtml = `<div class="mt-3 ml-4 overflow-x-auto scrollbar-thin max-h-64 overflow-y-auto">
                             <table class="w-full text-sm">
