@@ -1366,6 +1366,10 @@ EDIT_HTML = """
                     <svg class="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
                     <h2 class="text-sm font-semibold text-white">Lainnya (Tanpa Rak)</h2>
                 </div>
+                <select id="tahunFilter" onchange="filterRows()"
+                    class="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-orange-500/50 cursor-pointer">
+                    <option value="">Semua Tahun</option>
+                </select>
                 <input id="searchInput" type="text" placeholder="Filter NUP / judul..."
                     class="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-orange-500/50 w-48"
                     oninput="filterRows()">
@@ -1401,6 +1405,7 @@ EDIT_HTML = """
         let submittedNups = new Set();
         let sortField = 'nup';
         let sortAsc = true;
+        let tahunOptions = [];
 
         function escapeHtml(s) {
             if (!s) return '';
@@ -1445,6 +1450,16 @@ EDIT_HTML = """
                 const data = await resp.json();
                 allItems = sortItems(data.items || [], sortField, sortAsc);
                 allItems.forEach(it => { if (it.submitted) submittedNups.add(it.nup); });
+                // Build tahun options
+                const tahunSet = new Set();
+                allItems.forEach(it => { if (it.tahun) tahunSet.add(it.tahun); });
+                tahunOptions = [...tahunSet].sort((a, b) => parseInt(a) - parseInt(b));
+                const sel = document.getElementById('tahunFilter');
+                tahunOptions.forEach(t => {
+                    const opt = document.createElement('option');
+                    opt.value = t; opt.textContent = t;
+                    sel.appendChild(opt);
+                });
                 renderStats(data.total, data.submitted_count);
                 renderTable(allItems);
                 updateSortUI();
@@ -1505,8 +1520,11 @@ EDIT_HTML = """
 
         function filterRows() {
             const q = document.getElementById('searchInput').value.toLowerCase();
+            const tahun = document.getElementById('tahunFilter').value;
             const filtered = sortItems(allItems, sortField, sortAsc).filter(item => {
-                return !q || item.nup.includes(q) || (item.judul || '').toLowerCase().includes(q) || (item.tahun || '').includes(q);
+                const matchText = !q || item.nup.includes(q) || (item.judul || '').toLowerCase().includes(q);
+                const matchTahun = !tahun || item.tahun === tahun;
+                return matchText && matchTahun;
             });
             renderTable(filtered);
         }
