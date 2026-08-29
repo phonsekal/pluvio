@@ -1335,6 +1335,10 @@ EDIT_HTML = """
         .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: rgba(255,150,50,0.5); }
         tr.submitted { opacity: 0.4; }
         tr.submitted td { text-decoration: line-through; }
+        #tahunFilter option { background: #1a0f00; color: #d1d5db; }
+        #tahunFilter option:hover { background: #2d1800; color: #fff; }
+        #tahunFilter option:checked { background: #2d1800; color: #fb923c; }
+        #tahunFilter { color-scheme: dark; }
     </style>
 </head>
 <body class="text-white">
