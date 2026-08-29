@@ -1327,22 +1327,24 @@ EDIT_HTML = """
             border: 1px solid rgba(255, 150, 50, 0.1);
         }
         .glass:hover { border-color: rgba(255, 150, 50, 0.2); }
-        input:focus, textarea:focus { box-shadow: 0 0 0 2px rgba(255, 150, 50, 0.3); }
+        input:focus { box-shadow: 0 0 0 2px rgba(255, 150, 50, 0.3); }
         .scrollbar-thin::-webkit-scrollbar { width: 6px; }
         .scrollbar-thin::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); border-radius: 3px; }
         .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(255,150,50,0.3); border-radius: 3px; }
         .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: rgba(255,150,50,0.5); }
+        tr.submitted { opacity: 0.4; }
+        tr.submitted td { text-decoration: line-through; }
     </style>
 </head>
 <body class="text-white">
     <!-- Header -->
     <header class="sticky top-0 z-50 glass border-b border-orange-500/10">
-        <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center text-white font-bold text-lg">P</div>
                 <div>
                     <h1 class="text-lg font-bold text-white">Edit Judul BMN</h1>
-                    <p class="text-[11px] text-gray-400">Cari NUP & ubah judul buku</p>
+                    <p class="text-[11px] text-gray-400">Item tanpa rak — input judul baru & kirim</p>
                 </div>
             </div>
             <div class="flex items-center gap-2">
@@ -1352,166 +1354,161 @@ EDIT_HTML = """
         </div>
     </header>
 
-    <main class="max-w-4xl mx-auto px-4 py-6 space-y-6">
-        <!-- Search Box -->
-        <div class="glass rounded-2xl p-6 fade-up" style="animation-delay: 0.1s">
-            <div class="flex items-center gap-2 mb-3">
-                <svg class="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                <h2 class="text-sm font-semibold text-white">Cari berdasarkan NUP</h2>
-            </div>
-            <div class="flex gap-3">
-                <input id="nupInput" type="text" placeholder="Masukkan NUP (misal: 3, 4932, 12345)" 
-                    class="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-orange-500/50 transition-colors"
-                    onkeydown="if(event.key==='Enter') searchNUP()">
-                <button onclick="searchNUP()" 
-                    class="px-6 py-3 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 rounded-xl text-sm font-semibold text-white transition-all hover:scale-105 active:scale-95">
-                    Cari
-                </button>
-            </div>
-            <div id="searchStatus" class="mt-2 text-xs text-gray-400 hidden"></div>
-        </div>
+    <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+        <!-- Stats -->
+        <div id="stats" class="flex flex-wrap gap-3 fade-up" style="animation-delay: 0.1s"></div>
 
-        <!-- Results -->
-        <div id="results" class="hidden space-y-4 fade-up" style="animation-delay: 0.2s"></div>
-
-        <!-- History -->
-        <div id="history" class="glass rounded-2xl p-6 fade-up hidden" style="animation-delay: 0.3s">
-            <div class="flex items-center justify-between mb-3">
+        <!-- Table -->
+        <div class="glass rounded-2xl overflow-hidden fade-up" style="animation-delay: 0.2s">
+            <div class="px-6 py-4 border-b border-white/5 flex items-center justify-between">
                 <div class="flex items-center gap-2">
                     <svg class="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-                    <h2 class="text-sm font-semibold text-white">Riwayat Edit</h2>
+                    <h2 class="text-sm font-semibold text-white">Lainnya (Tanpa Rak)</h2>
                 </div>
-                <span id="historyCount" class="text-[11px] text-gray-400"></span>
+                <input id="searchInput" type="text" placeholder="Filter NUP / judul..."
+                    class="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-orange-500/50 w-48"
+                    oninput="filterRows()">
             </div>
-            <div id="historyList" class="space-y-2 max-h-64 overflow-y-auto scrollbar-thin"></div>
+            <div id="loading" class="px-6 py-12 text-center">
+                <div class="inline-block w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
+                <p class="text-sm text-gray-400 mt-3">Memuat data...</p>
+            </div>
+            <div id="tableWrap" class="hidden overflow-x-auto scrollbar-thin">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-[11px] text-gray-400 uppercase tracking-wider border-b border-white/5 bg-white/[0.02]">
+                            <th class="px-4 py-3 w-12 text-center">#</th>
+                            <th class="px-4 py-3 w-24">NUP</th>
+                            <th class="px-4 py-3">Judul Lama</th>
+                            <th class="px-4 py-3 w-[35%]">Judul Baru</th>
+                            <th class="px-4 py-3 w-24 text-center">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody"></tbody>
+                </table>
+            </div>
         </div>
     </main>
 
     <script>
-        let editHistory = JSON.parse(localStorage.getItem('editHistory') || '[]');
-        renderHistory();
+        let allItems = [];
+        let submittedNups = new Set();
 
         function escapeHtml(s) {
             if (!s) return '';
             return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
 
-        async function searchNUP() {
-            const nup = document.getElementById('nupInput').value.trim();
-            if (!nup) return;
-            const status = document.getElementById('searchStatus');
-            const results = document.getElementById('results');
-            status.textContent = 'Mencari...';
-            status.classList.remove('hidden');
-            results.classList.add('hidden');
+        async function loadData() {
             try {
-                const resp = await fetch(`/api/search-nup?q=${encodeURIComponent(nup)}`);
+                const resp = await fetch('/api/unmatched');
                 const data = await resp.json();
-                if (data.error) {
-                    status.textContent = data.error;
-                    return;
-                }
-                status.textContent = `Ditemukan ${data.items.length} hasil untuk "${escapeHtml(data.query)}"`;
-                renderResults(data.items);
+                allItems = data.items || [];
+                // Build submitted set from items marked as submitted
+                allItems.forEach(it => { if (it.submitted) submittedNups.add(it.nup); });
+                renderStats(data.total, data.submitted_count);
+                renderTable(allItems);
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('tableWrap').classList.remove('hidden');
             } catch (e) {
-                status.textContent = 'Gagal mencari. Coba lagi.';
+                document.getElementById('loading').innerHTML = '<p class="text-sm text-red-400">Gagal memuat data.</p>';
             }
         }
 
-        function renderResults(items) {
-            const container = document.getElementById('results');
-            if (items.length === 0) {
-                container.innerHTML = '<div class="glass rounded-2xl p-6 text-center text-gray-400 text-sm">Tidak ditemukan</div>';
-                container.classList.remove('hidden');
-                return;
-            }
-            container.innerHTML = items.map((item, idx) => {
-                const savedTitle = editHistory.find(e => e.nup === item.nup);
-                const currentTitle = savedTitle ? savedTitle.judul_baru : item.merk;
-                return `<div class="glass rounded-2xl p-5 space-y-3">
-                    <div class="flex items-start justify-between gap-4">
-                        <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-2 mb-1">
-                                <span class="text-xs font-mono text-orange-300 font-semibold">NUP: ${escapeHtml(item.nup)}</span>
-                                ${item.kode ? `<span class="text-[11px] text-gray-500">|</span><span class="text-[11px] font-mono text-gray-400">${escapeHtml(item.kode)}</span>` : ''}
-                            </div>
-                            <div class="text-[11px] text-gray-400 mb-1">Judul saat ini:</div>
-                            <div class="text-sm text-white font-medium break-words">${escapeHtml(currentTitle) || '<span class="text-gray-500 italic">Kosong</span>'}</div>
-                        </div>
-                    </div>
-                    <div class="space-y-2">
-                        <label class="text-[11px] text-gray-400">Judul Baru:</label>
-                        <textarea id="newTitle_${idx}" rows="2" 
-                            class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-orange-500/50 transition-colors resize-none"
-                            placeholder="Masukkan judul baru...">${escapeHtml(currentTitle) || ''}</textarea>
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <div id="saveStatus_${idx}" class="text-xs text-gray-400"></div>
-                        <button onclick="saveEdit(${idx}, '${escapeHtml(item.nup)}')" id="saveBtn_${idx}"
-                            class="px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 rounded-xl text-xs font-semibold text-white transition-all hover:scale-105 active:scale-95">
-                            💾 Simpan
-                        </button>
-                    </div>
-                </div>`;
+        function renderStats(total, submitted) {
+            const remaining = total - submitted;
+            document.getElementById('stats').innerHTML = `
+                <div class="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
+                    <span class="text-lg">📦</span>
+                    <div><div class="text-lg font-bold text-white">${total.toLocaleString()}</div><div class="text-[11px] text-gray-400">Total Tanpa Rak</div></div>
+                </div>
+                <div class="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
+                    <span class="text-lg">✅</span>
+                    <div><div class="text-lg font-bold text-emerald-400">${submitted.toLocaleString()}</div><div class="text-[11px] text-gray-400">Sudah Dikirim</div></div>
+                </div>
+                <div class="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
+                    <span class="text-lg">⏳</span>
+                    <div><div class="text-lg font-bold text-orange-400">${remaining.toLocaleString()}</div><div class="text-[11px] text-gray-400">Belum Dikirim</div></div>
+                </div>
+            `;
+        }
+
+        function renderTable(items) {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = items.map((item, i) => {
+                const isSubmitted = submittedNups.has(item.nup);
+                const rowClass = isSubmitted ? 'submitted' : '';
+                return `<tr class="border-t border-white/[0.03] hover:bg-white/[0.02] ${rowClass}" id="row_${item.nup}">
+                    <td class="px-4 py-2.5 text-center text-xs text-gray-500">${i + 1}</td>
+                    <td class="px-4 py-2.5 font-mono text-xs text-orange-300 font-semibold">${escapeHtml(item.nup)}</td>
+                    <td class="px-4 py-2.5 text-xs text-gray-300 max-w-xs truncate" title="${escapeHtml(item.judul)}">${escapeHtml(item.judul) || '<span class="text-gray-500 italic">Kosong</span>'}</td>
+                    <td class="px-4 py-2.5">
+                        <input type="text" id="input_${item.nup}"
+                            class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-orange-500/50"
+                            placeholder="Ketik judul baru..."
+                            value="${escapeHtml(item.judul || '')}"
+                            ${isSubmitted ? 'disabled' : ''}>
+                    </td>
+                    <td class="px-4 py-2.5 text-center">
+                        ${isSubmitted
+                            ? '<span class="text-[11px] text-emerald-400 font-semibold">✓ Terkirim</span>'
+                            : `<button onclick="kirimItem('${escapeHtml(item.nup)}')" id="btn_${item.nup}"
+                                class="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 rounded-lg text-[11px] font-semibold text-white transition-all hover:scale-105 active:scale-95 whitespace-nowrap">
+                                ✉️ Kirim
+                            </button>`
+                        }
+                    </td>
+                </tr>`;
             }).join('');
-            container.classList.remove('hidden');
         }
 
-        async function saveEdit(idx, nup) {
-            const textarea = document.getElementById(`newTitle_${idx}`);
-            const status = document.getElementById(`saveStatus_${idx}`);
-            const btn = document.getElementById(`saveBtn_${idx}`);
-            const newTitle = textarea.value.trim();
-            if (!newTitle) { status.textContent = 'Judul tidak boleh kosong!'; status.className = 'text-xs text-red-400'; return; }
+        function filterRows() {
+            const q = document.getElementById('searchInput').value.toLowerCase();
+            const rows = document.querySelectorAll('#tableBody tr');
+            rows.forEach((row, i) => {
+                const item = allItems[i];
+                if (!item) return;
+                const match = !q || item.nup.includes(q) || (item.judul || '').toLowerCase().includes(q);
+                row.style.display = match ? '' : 'none';
+            });
+        }
+
+        async function kirimItem(nup) {
+            const input = document.getElementById(`input_${nup}`);
+            const btn = document.getElementById(`btn_${nup}`);
+            const judulBaru = input.value.trim();
+            if (!judulBaru) { input.style.borderColor = 'rgb(239 68 68)'; setTimeout(() => input.style.borderColor = '', 1500); return; }
             btn.disabled = true;
-            btn.textContent = 'Menyimpan...';
+            btn.innerHTML = '<span class="inline-block w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></span>';
             try {
                 const resp = await fetch('/api/save-edit', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ nup: nup, judul_baru: newTitle })
+                    body: JSON.stringify({ nup, judul_baru: judulBaru })
                 });
                 const data = await resp.json();
                 if (data.ok) {
-                    status.textContent = '✅ Tersimpan!';
-                    status.className = 'text-xs text-emerald-400';
-                    // Update history
-                    const existing = editHistory.findIndex(e => e.nup === nup);
-                    const entry = { nup, judul_baru: newTitle, timestamp: new Date().toISOString() };
-                    if (existing >= 0) editHistory[existing] = entry; else editHistory.unshift(entry);
-                    localStorage.setItem('editHistory', JSON.stringify(editHistory));
-                    renderHistory();
+                    submittedNups.add(nup);
+                    const row = document.getElementById(`row_${nup}`);
+                    row.classList.add('submitted');
+                    input.disabled = true;
+                    btn.outerHTML = '<span class="text-[11px] text-emerald-400 font-semibold">✓ Terkirim</span>';
+                    // Update stats
+                    const total = allItems.length;
+                    renderStats(total, submittedNups.size);
                 } else {
-                    status.textContent = '❌ ' + (data.error || 'Gagal menyimpan');
-                    status.className = 'text-xs text-red-400';
+                    btn.innerHTML = '✉️ Kirim';
+                    btn.disabled = false;
+                    alert(data.error || 'Gagal menyimpan');
                 }
             } catch (e) {
-                status.textContent = '❌ Gagal menyimpan';
-                status.className = 'text-xs text-red-400';
+                btn.innerHTML = '✉️ Kirim';
+                btn.disabled = false;
+                alert('Gagal mengirim. Coba lagi.');
             }
-            btn.disabled = false;
-            btn.textContent = '💾 Simpan';
         }
 
-        function renderHistory() {
-            const container = document.getElementById('history');
-            const list = document.getElementById('historyList');
-            const count = document.getElementById('historyCount');
-            if (editHistory.length === 0) { container.classList.add('hidden'); return; }
-            container.classList.remove('hidden');
-            count.textContent = `${editHistory.length} item`;
-            list.innerHTML = editHistory.map(h => {
-                const d = new Date(h.timestamp);
-                const dateStr = d.toLocaleDateString('id-ID') + ' ' + d.toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit'});
-                return `<div class="flex items-center justify-between gap-3 py-2 border-b border-white/5 last:border-0">
-                    <div class="flex-1 min-w-0">
-                        <span class="text-xs font-mono text-orange-300">${escapeHtml(h.nup)}</span>
-                        <div class="text-xs text-white truncate">${escapeHtml(h.judul_baru)}</div>
-                    </div>
-                    <span class="text-[10px] text-gray-500 whitespace-nowrap">${dateStr}</span>
-                </div>`;
-            }).join('');
-        }
+        loadData();
     </script>
 </body>
 </html>
@@ -1532,6 +1529,44 @@ async def search_nup(q: str = ""):
     csv_items = read_csv_local()
     matches = [item for item in csv_items if q in str(item.get("nup", ""))]
     return {"items": matches, "query": q, "total": len(matches)}
+
+
+@app.get("/api/unmatched")
+async def get_unmatched():
+    """Get items that don't match any rak (Lainnya tanpa Rak)."""
+    csv_items = read_csv_local()
+    sheet_items = await read_google_sheet()
+    inventory_items = read_inventory()
+    rak_config = load_rak_config()
+    result = get_rak_progress(csv_items, sheet_items, inventory_items, rak_config)
+    unmatched = result.get("unmatched", [])
+    # Sort by NUP numerically
+    def nup_sort_key(item):
+        try:
+            return int(item["nup"])
+        except (ValueError, TypeError):
+            return 0
+    unmatched.sort(key=nup_sort_key)
+    # Get already-submitted NUPs from Sheet2
+    submitted_nups = set()
+    edit_sheet_id = EDIT_SHEET_ID
+    if edit_sheet_id:
+        try:
+            svc = _get_sheets_service_writable()
+            if svc:
+                existing = svc.spreadsheets().values().get(
+                    spreadsheetId=edit_sheet_id,
+                    range="Sheet2!B:C"
+                ).execute()
+                for row in existing.get("values", [][1:]):  # skip header
+                    if len(row) >= 2 and row[1].strip():
+                        submitted_nups.add(row[0].strip())
+        except Exception:
+            pass
+    # Mark items that have already been submitted
+    for item in unmatched:
+        item["submitted"] = item["nup"] in submitted_nups
+    return {"items": unmatched, "total": len(unmatched), "submitted_count": len(submitted_nups)}
 
 
 @app.post("/api/save-edit")
