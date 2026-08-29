@@ -40,7 +40,7 @@ def _get_gdrive_creds():
                 continue
             try:
                 data = json.loads(p.read_text())
-                if data.get("type") == "service_account":
+                if isinstance(data, dict) and data.get("type") == "service_account":
                     creds_json = p.read_text()
                     break
             except (json.JSONDecodeError, KeyError):
@@ -1553,7 +1553,7 @@ async def save_edit(request: dict):
         try:
             existing = svc.spreadsheets().values().get(
                 spreadsheetId=edit_sheet_id,
-                range="Sheet1!A:C"
+                range="Sheet2!A:C"
             ).execute()
             rows = existing.get("values", [])
         except Exception:
@@ -1563,7 +1563,7 @@ async def save_edit(request: dict):
         if len(rows) == 0:
             svc.spreadsheets().values().update(
                 spreadsheetId=edit_sheet_id,
-                range="Sheet1!A1:C1",
+                range="Sheet2!A1:C1",
                 valueInputOption="RAW",
                 body={"values": [["Nomor", "NUP", "Judul Baru"]]}
             ).execute()
@@ -1571,7 +1571,7 @@ async def save_edit(request: dict):
         # Append data
         svc.spreadsheets().values().append(
             spreadsheetId=edit_sheet_id,
-            range=f"Sheet1!A{next_row}:C{next_row}",
+            range=f"Sheet2!A{next_row}:C{next_row}",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": [[next_row - 1, nup, judul_baru]]}
