@@ -68,8 +68,9 @@ def read_csv_local():
                 k3 = row.get("Kode3", "").strip()
                 parts = [k for k in [k1, k2, k3] if k and k != "-"]
                 kodifikasi = "/".join(parts) if parts else ""
+                tahun = row.get("Tahun Perolehan", "").strip()
                 if nup:
-                    items.append({"nup": nup, "judul": judul, "kodifikasi": kodifikasi})
+                    items.append({"nup": nup, "judul": judul, "kodifikasi": kodifikasi, "tahun": tahun})
     except Exception as e:
         print(f"Error reading CSV: {e}")
     return items
@@ -459,7 +460,7 @@ def get_rak_progress(csv_items, sheet_items, inventory_items, rak_config):
             else:
                 cat = "belum_ditemukan"
 
-        item = {"nup": nup, "judul": judul, "kodifikasi": kodifikasi}
+        item = {"nup": nup, "judul": judul, "kodifikasi": kodifikasi, "tahun": ci.get("tahun", "")}
 
         if rak_name and rak_name in result:
             result[rak_name][cat].append(item)
@@ -1378,9 +1379,14 @@ EDIT_HTML = """
                     <thead>
                         <tr class="text-left text-[11px] text-gray-400 uppercase tracking-wider border-b border-white/5 bg-white/[0.02]">
                             <th class="px-4 py-3 w-12 text-center">#</th>
-                            <th class="px-4 py-3 w-24">NUP</th>
+                            <th class="px-4 py-3 w-24">
+                                <button id="sort_nup" data-label="NUP" onclick="toggleSort('nup')" class="hover:text-orange-300 transition-colors cursor-pointer">NUP</button>
+                            </th>
+                            <th class="px-4 py-3 w-20">
+                                <button id="sort_tahun" data-label="Tahun" onclick="toggleSort('tahun')" class="hover:text-orange-300 transition-colors cursor-pointer">Tahun</button>
+                            </th>
                             <th class="px-4 py-3">Judul Lama</th>
-                            <th class="px-4 py-3 w-[35%]">Judul Baru</th>
+                            <th class="px-4 py-3 w-[30%]">Judul Baru</th>
                             <th class="px-4 py-3 w-24 text-center">Status</th>
                         </tr>
                     </thead>
@@ -1393,21 +1399,55 @@ EDIT_HTML = """
     <script>
         let allItems = [];
         let submittedNups = new Set();
+        let sortField = 'nup';
+        let sortAsc = true;
 
         function escapeHtml(s) {
             if (!s) return '';
             return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
 
+        function sortItems(items, field, asc) {
+            return [...items].sort((a, b) => {
+                let va = a[field] || '';
+                let vb = b[field] || '';
+                if (field === 'nup' || field === 'tahun') {
+                    va = parseInt(va) || 0;
+                    vb = parseInt(vb) || 0;
+                    return asc ? va - vb : vb - va;
+                }
+                return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+            });
+        }
+
+        function updateSortUI() {
+            ['nup', 'tahun'].forEach(f => {
+                const btn = document.getElementById('sort_' + f);
+                if (!btn) return;
+                const arrow = (sortField === f) ? (sortAsc ? ' ↑' : ' ↓') : '';
+                btn.innerHTML = btn.dataset.label + arrow;
+                btn.classList.toggle('text-orange-300', sortField === f);
+                btn.classList.toggle('text-gray-400', sortField !== f);
+            });
+        }
+
+        function toggleSort(field) {
+            if (sortField === field) { sortAsc = !sortAsc; }
+            else { sortField = field; sortAsc = true; }
+            allItems = sortItems(allItems, sortField, sortAsc);
+            updateSortUI();
+            renderTable(allItems);
+        }
+
         async function loadData() {
             try {
                 const resp = await fetch('/api/unmatched');
                 const data = await resp.json();
-                allItems = data.items || [];
-                // Build submitted set from items marked as submitted
+                allItems = sortItems(data.items || [], sortField, sortAsc);
                 allItems.forEach(it => { if (it.submitted) submittedNups.add(it.nup); });
                 renderStats(data.total, data.submitted_count);
                 renderTable(allItems);
+                updateSortUI();
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('tableWrap').classList.remove('hidden');
             } catch (e) {
@@ -1441,6 +1481,7 @@ EDIT_HTML = """
                 return `<tr class="border-t border-white/[0.03] hover:bg-white/[0.02] ${rowClass}" id="row_${item.nup}">
                     <td class="px-4 py-2.5 text-center text-xs text-gray-500">${i + 1}</td>
                     <td class="px-4 py-2.5 font-mono text-xs text-orange-300 font-semibold">${escapeHtml(item.nup)}</td>
+                    <td class="px-4 py-2.5 text-xs text-gray-300">${escapeHtml(item.tahun) || '-'}</td>
                     <td class="px-4 py-2.5 text-xs text-gray-300 max-w-xs truncate" title="${escapeHtml(item.judul)}">${escapeHtml(item.judul) || '<span class="text-gray-500 italic">Kosong</span>'}</td>
                     <td class="px-4 py-2.5">
                         <input type="text" id="input_${item.nup}"
@@ -1464,13 +1505,10 @@ EDIT_HTML = """
 
         function filterRows() {
             const q = document.getElementById('searchInput').value.toLowerCase();
-            const rows = document.querySelectorAll('#tableBody tr');
-            rows.forEach((row, i) => {
-                const item = allItems[i];
-                if (!item) return;
-                const match = !q || item.nup.includes(q) || (item.judul || '').toLowerCase().includes(q);
-                row.style.display = match ? '' : 'none';
+            const filtered = sortItems(allItems, sortField, sortAsc).filter(item => {
+                return !q || item.nup.includes(q) || (item.judul || '').toLowerCase().includes(q) || (item.tahun || '').includes(q);
             });
+            renderTable(filtered);
         }
 
         async function kirimItem(nup) {
