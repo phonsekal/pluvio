@@ -25,6 +25,7 @@ CREDS_PATH = Path(__file__).parent / "gdrive-creds.json"
 # Also check for existing service account JSON files
 CREDS_GLOB = list(Path(__file__).parent.glob("*.json"))
 RAK_CONFIG_PATH = Path(__file__).parent / "rak_config.json"
+EDIT_SHEET_ID = os.environ.get("EDIT_SHEET_ID", "")
 
 
 def _get_gdrive_creds():
@@ -116,6 +117,25 @@ def _get_sheets_service():
         return build("sheets", "v4", credentials=creds, cache_discovery=False)
     except Exception as e:
         print(f"Sheets API init failed: {e}")
+        return None
+
+
+def _get_sheets_service_writable():
+    """Google Sheets API with write permission for saving edits."""
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+
+        creds_info = _get_gdrive_creds()
+        if not creds_info:
+            return None
+        creds = service_account.Credentials.from_service_account_info(
+            creds_info,
+            scopes=["https://www.googleapis.com/auth/spreadsheets"],
+        )
+        return build("sheets", "v4", credentials=creds, cache_discovery=False)
+    except Exception as e:
+        print(f"Sheets writable API init failed: {e}")
         return None
 
 
@@ -647,6 +667,7 @@ SENsus_HTML = """<!DOCTYPE html>
             <div class="flex items-center gap-3">
                 <div id="lastUpdated" class="text-xs text-gray-400 hidden sm:block"></div>
                 <a href="/rak" class="text-xs text-orange-400 hover:text-orange-300 font-medium px-3 py-1.5 rounded-lg border border-orange-500/20 hover:border-orange-500/40 transition-colors">📊 Progress per Rak</a>
+                <a href="/edit" class="text-xs text-orange-400 hover:text-orange-300 font-medium px-3 py-1.5 rounded-lg border border-orange-500/20 hover:border-orange-500/40 transition-colors">✏️ Edit Judul</a>
             </div>
         </div>
     </header>
@@ -919,7 +940,10 @@ RAK_HTML = """<!DOCTYPE html>
                     <p class="text-[11px] text-gray-400 font-medium tracking-wide uppercase">Progress per Rak</p>
                 </div>
             </div>
-            <a href="/" class="text-xs text-orange-400 hover:text-orange-300 font-medium px-3 py-1.5 rounded-lg border border-orange-500/20 hover:border-orange-500/40 transition-colors">← Sensus BMN</a>
+            <div class="flex items-center gap-2">
+                <a href="/" class="text-xs text-orange-400 hover:text-orange-300 font-medium px-3 py-1.5 rounded-lg border border-orange-500/20 hover:border-orange-500/40 transition-colors">← Sensus BMN</a>
+                <a href="/edit" class="text-xs text-orange-400 hover:text-orange-300 font-medium px-3 py-1.5 rounded-lg border border-orange-500/20 hover:border-orange-500/40 transition-colors">✏️ Edit Judul</a>
+            </div>
         </div>
     </header>
 
@@ -1280,3 +1304,278 @@ async def get_kodifikasi_data():
 @app.get("/api/profile")
 async def get_profile():
     return {"name": "PLUVIO", "description": "Sensus BMN Dashboard"}
+
+
+# ── Edit Judul ──────────────────────────────────────────────────────
+EDIT_HTML = """
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PLUVIO - Edit Judul BMN</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #1a0f00 0%, #2d1800 30%, #1a0f00 60%, #0d0700 100%);
+            min-height: 100vh;
+        }
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-up { animation: fadeInUp 0.5s ease-out forwards; }
+        .glass {
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid rgba(255, 150, 50, 0.1);
+        }
+        .glass:hover { border-color: rgba(255, 150, 50, 0.2); }
+        input:focus, textarea:focus { box-shadow: 0 0 0 2px rgba(255, 150, 50, 0.3); }
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); border-radius: 3px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(255,150,50,0.3); border-radius: 3px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: rgba(255,150,50,0.5); }
+    </style>
+</head>
+<body class="text-white">
+    <!-- Header -->
+    <header class="sticky top-0 z-50 glass border-b border-orange-500/10">
+        <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center text-white font-bold text-lg">P</div>
+                <div>
+                    <h1 class="text-lg font-bold text-white">Edit Judul BMN</h1>
+                    <p class="text-[11px] text-gray-400">Cari NUP & ubah judul buku</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <a href="/" class="text-xs text-orange-400 hover:text-orange-300 font-medium px-3 py-1.5 rounded-lg border border-orange-500/20 hover:border-orange-500/40 transition-colors">📋 Sensus BMN</a>
+                <a href="/rak" class="text-xs text-orange-400 hover:text-orange-300 font-medium px-3 py-1.5 rounded-lg border border-orange-500/20 hover:border-orange-500/40 transition-colors">📊 Progress per Rak</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-4xl mx-auto px-4 py-6 space-y-6">
+        <!-- Search Box -->
+        <div class="glass rounded-2xl p-6 fade-up" style="animation-delay: 0.1s">
+            <div class="flex items-center gap-2 mb-3">
+                <svg class="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                <h2 class="text-sm font-semibold text-white">Cari berdasarkan NUP</h2>
+            </div>
+            <div class="flex gap-3">
+                <input id="nupInput" type="text" placeholder="Masukkan NUP (misal: 3, 4932, 12345)" 
+                    class="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-orange-500/50 transition-colors"
+                    onkeydown="if(event.key==='Enter') searchNUP()">
+                <button onclick="searchNUP()" 
+                    class="px-6 py-3 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 rounded-xl text-sm font-semibold text-white transition-all hover:scale-105 active:scale-95">
+                    Cari
+                </button>
+            </div>
+            <div id="searchStatus" class="mt-2 text-xs text-gray-400 hidden"></div>
+        </div>
+
+        <!-- Results -->
+        <div id="results" class="hidden space-y-4 fade-up" style="animation-delay: 0.2s"></div>
+
+        <!-- History -->
+        <div id="history" class="glass rounded-2xl p-6 fade-up hidden" style="animation-delay: 0.3s">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                    <svg class="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                    <h2 class="text-sm font-semibold text-white">Riwayat Edit</h2>
+                </div>
+                <span id="historyCount" class="text-[11px] text-gray-400"></span>
+            </div>
+            <div id="historyList" class="space-y-2 max-h-64 overflow-y-auto scrollbar-thin"></div>
+        </div>
+    </main>
+
+    <script>
+        let editHistory = JSON.parse(localStorage.getItem('editHistory') || '[]');
+        renderHistory();
+
+        function escapeHtml(s) {
+            if (!s) return '';
+            return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        async function searchNUP() {
+            const nup = document.getElementById('nupInput').value.trim();
+            if (!nup) return;
+            const status = document.getElementById('searchStatus');
+            const results = document.getElementById('results');
+            status.textContent = 'Mencari...';
+            status.classList.remove('hidden');
+            results.classList.add('hidden');
+            try {
+                const resp = await fetch(`/api/search-nup?q=${encodeURIComponent(nup)}`);
+                const data = await resp.json();
+                if (data.error) {
+                    status.textContent = data.error;
+                    return;
+                }
+                status.textContent = `Ditemukan ${data.items.length} hasil untuk "${escapeHtml(data.query)}"`;
+                renderResults(data.items);
+            } catch (e) {
+                status.textContent = 'Gagal mencari. Coba lagi.';
+            }
+        }
+
+        function renderResults(items) {
+            const container = document.getElementById('results');
+            if (items.length === 0) {
+                container.innerHTML = '<div class="glass rounded-2xl p-6 text-center text-gray-400 text-sm">Tidak ditemukan</div>';
+                container.classList.remove('hidden');
+                return;
+            }
+            container.innerHTML = items.map((item, idx) => {
+                const savedTitle = editHistory.find(e => e.nup === item.nup);
+                const currentTitle = savedTitle ? savedTitle.judul_baru : item.merk;
+                return `<div class="glass rounded-2xl p-5 space-y-3">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="text-xs font-mono text-orange-300 font-semibold">NUP: ${escapeHtml(item.nup)}</span>
+                                ${item.kode ? `<span class="text-[11px] text-gray-500">|</span><span class="text-[11px] font-mono text-gray-400">${escapeHtml(item.kode)}</span>` : ''}
+                            </div>
+                            <div class="text-[11px] text-gray-400 mb-1">Judul saat ini:</div>
+                            <div class="text-sm text-white font-medium break-words">${escapeHtml(currentTitle) || '<span class="text-gray-500 italic">Kosong</span>'}</div>
+                        </div>
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-[11px] text-gray-400">Judul Baru:</label>
+                        <textarea id="newTitle_${idx}" rows="2" 
+                            class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-orange-500/50 transition-colors resize-none"
+                            placeholder="Masukkan judul baru...">${escapeHtml(currentTitle) || ''}</textarea>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <div id="saveStatus_${idx}" class="text-xs text-gray-400"></div>
+                        <button onclick="saveEdit(${idx}, '${escapeHtml(item.nup)}')" id="saveBtn_${idx}"
+                            class="px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 rounded-xl text-xs font-semibold text-white transition-all hover:scale-105 active:scale-95">
+                            💾 Simpan
+                        </button>
+                    </div>
+                </div>`;
+            }).join('');
+            container.classList.remove('hidden');
+        }
+
+        async function saveEdit(idx, nup) {
+            const textarea = document.getElementById(`newTitle_${idx}`);
+            const status = document.getElementById(`saveStatus_${idx}`);
+            const btn = document.getElementById(`saveBtn_${idx}`);
+            const newTitle = textarea.value.trim();
+            if (!newTitle) { status.textContent = 'Judul tidak boleh kosong!'; status.className = 'text-xs text-red-400'; return; }
+            btn.disabled = true;
+            btn.textContent = 'Menyimpan...';
+            try {
+                const resp = await fetch('/api/save-edit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ nup: nup, judul_baru: newTitle })
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    status.textContent = '✅ Tersimpan!';
+                    status.className = 'text-xs text-emerald-400';
+                    // Update history
+                    const existing = editHistory.findIndex(e => e.nup === nup);
+                    const entry = { nup, judul_baru: newTitle, timestamp: new Date().toISOString() };
+                    if (existing >= 0) editHistory[existing] = entry; else editHistory.unshift(entry);
+                    localStorage.setItem('editHistory', JSON.stringify(editHistory));
+                    renderHistory();
+                } else {
+                    status.textContent = '❌ ' + (data.error || 'Gagal menyimpan');
+                    status.className = 'text-xs text-red-400';
+                }
+            } catch (e) {
+                status.textContent = '❌ Gagal menyimpan';
+                status.className = 'text-xs text-red-400';
+            }
+            btn.disabled = false;
+            btn.textContent = '💾 Simpan';
+        }
+
+        function renderHistory() {
+            const container = document.getElementById('history');
+            const list = document.getElementById('historyList');
+            const count = document.getElementById('historyCount');
+            if (editHistory.length === 0) { container.classList.add('hidden'); return; }
+            container.classList.remove('hidden');
+            count.textContent = `${editHistory.length} item`;
+            list.innerHTML = editHistory.map(h => {
+                const d = new Date(h.timestamp);
+                const dateStr = d.toLocaleDateString('id-ID') + ' ' + d.toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit'});
+                return `<div class="flex items-center justify-between gap-3 py-2 border-b border-white/5 last:border-0">
+                    <div class="flex-1 min-w-0">
+                        <span class="text-xs font-mono text-orange-300">${escapeHtml(h.nup)}</span>
+                        <div class="text-xs text-white truncate">${escapeHtml(h.judul_baru)}</div>
+                    </div>
+                    <span class="text-[10px] text-gray-500 whitespace-nowrap">${dateStr}</span>
+                </div>`;
+            }).join('');
+        }
+    </script>
+</body>
+</html>
+"""
+
+
+@app.get("/edit", response_class=HTMLResponse)
+async def edit_page():
+    return EDIT_HTML
+
+
+@app.get("/api/search-nup")
+async def search_nup(q: str = ""):
+    """Search CSV items by NUP."""
+    q = q.strip()
+    if not q:
+        return {"error": "NUP tidak boleh kosong", "items": [], "query": q}
+    csv_items = read_csv_local()
+    matches = [item for item in csv_items if q in str(item.get("nup", ""))]
+    return {"items": matches, "query": q, "total": len(matches)}
+
+
+@app.post("/api/save-edit")
+async def save_edit(request: dict):
+    """Save edited title to Google Sheet."""
+    nup = request.get("nup", "").strip()
+    judul_baru = request.get("judul_baru", "").strip()
+    if not nup or not judul_baru:
+        return {"ok": False, "error": "NUP dan Judul Baru harus diisi"}
+    # Try to save to a dedicated edit spreadsheet
+    edit_sheet_id = EDIT_SHEET_ID
+    if not edit_sheet_id:
+        return {"ok": False, "error": "EDIT_SHEET_ID belum dikonfigurasi. Hubungi admin."}
+    try:
+        svc = _get_sheets_service_writable()
+        if not svc:
+            return {"ok": False, "error": "Gagal koneksi ke Google Sheets"}
+        # Read existing data to get next row number
+        try:
+            existing = svc.spreadsheets().values().get(
+                spreadsheetId=edit_sheet_id,
+                range="Sheet1!A:C"
+            ).execute()
+            rows = existing.get("values", [])
+        except Exception:
+            rows = []
+        next_row = len(rows) + 1
+        # Write header if first row
+        if len(rows) == 0:
+            svc.spreadsheets().values().update(
+                spreadsheetId=edit_sheet_id,
+                range="Sheet1!A1:C1",
+                valueInputOption="RAW",
+                body={"values": [["Nomor", "NUP", "Judul Baru"]]}
+            ).execute()
+            next_row = 2
+        # Append data
+        svc.spreadsheets().values().append(
+            spreadsheetId=edit_sheet_id,
+            range=f"Sheet1!A{next_row}:C{next_row}",
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body={"values": [[next_row - 1, nup, judul_baru]]}
+        ).execute()
+        return {"ok": True, "row": next_row - 1}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
