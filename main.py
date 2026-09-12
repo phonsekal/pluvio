@@ -1349,7 +1349,7 @@ EDIT_HTML = """
                 <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-orange-700 flex items-center justify-center text-white font-bold text-lg">P</div>
                 <div>
                     <h1 class="text-lg font-bold text-white">Edit Judul BMN</h1>
-                    <p class="text-[11px] text-gray-400">Item tanpa rak — input judul baru & kirim</p>
+                    <p class="text-[11px] text-gray-400">Semua rak — cek status spreadsheet & input judul baru</p>
                 </div>
             </div>
             <div class="flex items-center gap-2">
@@ -1365,11 +1365,21 @@ EDIT_HTML = """
 
         <!-- Table -->
         <div class="glass rounded-2xl overflow-hidden fade-up" style="animation-delay: 0.2s">
-            <div class="px-6 py-4 border-b border-white/5 flex items-center justify-between">
-                <div class="flex items-center gap-2">
+            <div class="px-6 py-4 border-b border-white/5 flex flex-wrap items-center gap-2">
+                <div class="flex items-center gap-2 mr-auto">
                     <svg class="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-                    <h2 class="text-sm font-semibold text-white">Lainnya (Tanpa Rak)</h2>
+                    <h2 id="groupTitle" class="text-sm font-semibold text-white">Semua Rak</h2>
                 </div>
+                <select id="rakFilter" onchange="filterRows()"
+                    class="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-orange-500/50 cursor-pointer max-w-[190px]">
+                    <option value="">Semua Rak</option>
+                </select>
+                <select id="ketemuFilter" onchange="filterRows()"
+                    class="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-orange-500/50 cursor-pointer">
+                    <option value="">Semua Status Sheet</option>
+                    <option value="sudah">✅ Sudah Ketemu</option>
+                    <option value="belum">❌ Belum Ketemu</option>
+                </select>
                 <select id="tahunFilter" onchange="filterRows()"
                     class="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-orange-500/50 cursor-pointer">
                     <option value="">Semua Tahun</option>
@@ -1395,6 +1405,7 @@ EDIT_HTML = """
                             </th>
                             <th class="px-4 py-3">Judul Lama</th>
                             <th class="px-4 py-3 w-[30%]">Judul Baru</th>
+                            <th class="px-4 py-3 w-36 text-center">Spreadsheet Sensus</th>
                             <th class="px-4 py-3 w-24 text-center">Status</th>
                         </tr>
                     </thead>
@@ -1406,6 +1417,7 @@ EDIT_HTML = """
 
     <script>
         let allItems = [];
+        let rakOrder = [];
         let submittedNups = new Set();
         let sortField = 'nup';
         let sortAsc = true;
@@ -1443,16 +1455,22 @@ EDIT_HTML = """
         function toggleSort(field) {
             if (sortField === field) { sortAsc = !sortAsc; }
             else { sortField = field; sortAsc = true; }
-            allItems = sortItems(allItems, sortField, sortAsc);
             updateSortUI();
-            renderTable(allItems);
+            filterRows();
         }
 
         async function loadData() {
             try {
                 const resp = await fetch('/api/unmatched');
                 const data = await resp.json();
-                allItems = sortItems(data.items || [], sortField, sortAsc);
+                const groups = data.groups || [];
+                allItems = [];
+                rakOrder = [];
+                groups.forEach(g => {
+                    if (!g.items || g.items.length === 0) return;
+                    rakOrder.push(g.name);
+                    g.items.forEach(it => allItems.push({ ...it, rak: g.name, rakCategory: g.category }));
+                });
                 allItems.forEach(it => { if (it.submitted) submittedNups.add(it.nup); });
                 // Build tahun options
                 const tahunSet = new Set();
@@ -1464,8 +1482,15 @@ EDIT_HTML = """
                     opt.value = t; opt.textContent = t;
                     sel.appendChild(opt);
                 });
-                renderStats(data.total, data.submitted_count);
-                renderTable(allItems);
+                // Build rak menu (semua rak + Lainnya tanpa Rak)
+                const rakSel = document.getElementById('rakFilter');
+                rakOrder.forEach(name => {
+                    const opt = document.createElement('option');
+                    opt.value = name; opt.textContent = name;
+                    rakSel.appendChild(opt);
+                });
+                renderStats();
+                renderTable(getFiltered());
                 updateSortUI();
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('tableWrap').classList.remove('hidden');
@@ -1474,63 +1499,113 @@ EDIT_HTML = """
             }
         }
 
-        function renderStats(total, submitted) {
-            const remaining = total - submitted;
+        function renderStats() {
+            const total = allItems.length;
+            const ketemu = allItems.filter(it => it.ketemu).length;
+            const belum = total - ketemu;
+            const submitted = allItems.filter(it => it.submitted || submittedNups.has(it.nup)).length;
             document.getElementById('stats').innerHTML = `
                 <div class="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
                     <span class="text-lg">📦</span>
-                    <div><div class="text-lg font-bold text-white">${total.toLocaleString()}</div><div class="text-[11px] text-gray-400">Total Tanpa Rak</div></div>
+                    <div><div class="text-lg font-bold text-white">${total.toLocaleString()}</div><div class="text-[11px] text-gray-400">Total Item</div></div>
                 </div>
                 <div class="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
                     <span class="text-lg">✅</span>
-                    <div><div class="text-lg font-bold text-emerald-400">${submitted.toLocaleString()}</div><div class="text-[11px] text-gray-400">Sudah Dikirim</div></div>
+                    <div><div class="text-lg font-bold text-emerald-400">${ketemu.toLocaleString()}</div><div class="text-[11px] text-gray-400">Sudah Ketemu di Sheet</div></div>
                 </div>
                 <div class="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
-                    <span class="text-lg">⏳</span>
-                    <div><div class="text-lg font-bold text-orange-400">${remaining.toLocaleString()}</div><div class="text-[11px] text-gray-400">Belum Dikirim</div></div>
+                    <span class="text-lg">❌</span>
+                    <div><div class="text-lg font-bold text-red-400">${belum.toLocaleString()}</div><div class="text-[11px] text-gray-400">Belum Ketemu di Sheet</div></div>
                 </div>
-            `;
+                <div class="glass rounded-xl px-4 py-2.5 flex items-center gap-3">
+                    <span class="text-lg">✉️</span>
+                    <div><div class="text-lg font-bold text-orange-400">${submitted.toLocaleString()}</div><div class="text-[11px] text-gray-400">Judul Sudah Dikirim</div></div>
+                </div>
+                <div class="w-full text-[11px] text-gray-400 px-1">
+                    ✅ <b class="text-emerald-400">Sudah Ketemu</b> = NUP sudah ada di spreadsheet sensus &nbsp;·&nbsp; ❌ <b class="text-red-400">Belum Ketemu</b> = NUP belum ada di spreadsheet sensus
+                </div>`;
         }
 
         function renderTable(items) {
             const tbody = document.getElementById('tableBody');
-            tbody.innerHTML = items.map((item, i) => {
-                const isSubmitted = submittedNups.has(item.nup);
-                const rowClass = isSubmitted ? 'submitted' : '';
-                return `<tr class="border-t border-white/[0.03] hover:bg-white/[0.02] ${rowClass}" id="row_${item.nup}">
-                    <td class="px-4 py-2.5 text-center text-xs text-gray-500">${i + 1}</td>
-                    <td class="px-4 py-2.5 font-mono text-xs text-orange-300 font-semibold">${escapeHtml(item.nup)}</td>
-                    <td class="px-4 py-2.5 text-xs text-gray-300">${escapeHtml(item.tahun) || '-'}</td>
-                    <td class="px-4 py-2.5 text-xs text-gray-300 max-w-xs truncate" title="${escapeHtml(item.judul)}">${escapeHtml(item.judul) || '<span class="text-gray-500 italic">Kosong</span>'}</td>
-                    <td class="px-4 py-2.5">
-                        <input type="text" id="input_${item.nup}"
-                            class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-orange-500/50"
-                            placeholder="Ketik judul baru..."
-                            value="${escapeHtml(item.judul || '')}"
-                            ${isSubmitted ? 'disabled' : ''}>
-                    </td>
-                    <td class="px-4 py-2.5 text-center">
-                        ${isSubmitted
-                            ? '<span class="text-[11px] text-emerald-400 font-semibold">✓ Terkirim</span>'
-                            : `<button onclick="kirimItem('${escapeHtml(item.nup)}')" id="btn_${item.nup}"
-                                class="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 rounded-lg text-[11px] font-semibold text-white transition-all hover:scale-105 active:scale-95 whitespace-nowrap">
-                                ✉️ Kirim
-                            </button>`
-                        }
+            const titleEl = document.getElementById('groupTitle');
+            if (!items.length) {
+                tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-10 text-center text-sm text-gray-500">Tidak ada item yang cocok.</td></tr>';
+                titleEl.textContent = 'Tidak ada data';
+                return;
+            }
+            // Group per rak (pertahankan urutan rak)
+            const byRak = {};
+            items.forEach(it => { (byRak[it.rak] = byRak[it.rak] || []).push(it); });
+            const orderedRaks = rakOrder.filter(r => byRak[r]);
+            let html = '';
+            let counter = 0;
+            orderedRaks.forEach(rak => {
+                const rows = sortItems(byRak[rak], sortField, sortAsc);
+                const ketemu = rows.filter(r => r.ketemu).length;
+                html += `<tr class="border-t border-white/10 bg-white/[0.04]">
+                    <td colspan="7" class="px-4 py-2">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="text-[11px] font-bold text-orange-300 uppercase tracking-wider">📚 ${escapeHtml(rak)}</span>
+                            <span class="text-[10px] text-gray-400">${rows.length} item</span>
+                            <span class="text-[10px] text-emerald-400">✅ ${ketemu} ketemu</span>
+                            <span class="text-[10px] text-red-400">❌ ${rows.length - ketemu} belum ketemu</span>
+                        </div>
                     </td>
                 </tr>`;
-            }).join('');
+                rows.forEach(item => {
+                    counter++;
+                    const isSubmitted = submittedNups.has(item.nup) || item.submitted;
+                    const rowClass = isSubmitted ? 'submitted' : '';
+                    const sheetBadge = item.ketemu
+                        ? '<span class="inline-block px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-semibold whitespace-nowrap">✅ Sudah Ketemu</span>'
+                        : '<span class="inline-block px-2 py-1 rounded-full bg-red-500/15 text-red-400 text-[10px] font-semibold whitespace-nowrap">❌ Belum Ketemu</span>';
+                    html += `<tr class="border-t border-white/[0.03] hover:bg-white/[0.02] ${rowClass}" id="row_${item.nup}">
+                        <td class="px-4 py-2.5 text-center text-xs text-gray-500">${counter}</td>
+                        <td class="px-4 py-2.5 font-mono text-xs text-orange-300 font-semibold">${escapeHtml(item.nup)}</td>
+                        <td class="px-4 py-2.5 text-xs text-gray-300">${escapeHtml(item.tahun) || '-'}</td>
+                        <td class="px-4 py-2.5 text-xs text-gray-300 max-w-xs truncate" title="${escapeHtml(item.judul)}">${escapeHtml(item.judul) || '<span class="text-gray-500 italic">Kosong</span>'}</td>
+                        <td class="px-4 py-2.5">
+                            <input type="text" id="input_${item.nup}"
+                                class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-orange-500/50"
+                                placeholder="Ketik judul baru..."
+                                value="${escapeHtml(item.judul || '')}"
+                                ${isSubmitted ? 'disabled' : ''}>
+                        </td>
+                        <td class="px-4 py-2.5 text-center">${sheetBadge}</td>
+                        <td class="px-4 py-2.5 text-center">
+                            ${isSubmitted
+                                ? '<span class="text-[11px] text-emerald-400 font-semibold">✓ Terkirim</span>'
+                                : `<button onclick="kirimItem('${escapeHtml(item.nup)}')" id="btn_${item.nup}"
+                                    class="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 rounded-lg text-[11px] font-semibold text-white transition-all hover:scale-105 active:scale-95 whitespace-nowrap">
+                                    ✉️ Kirim
+                                </button>`
+                            }
+                        </td>
+                    </tr>`;
+                });
+            });
+            tbody.innerHTML = html;
+            const rak = document.getElementById('rakFilter').value;
+            titleEl.textContent = rak ? rak : `Semua Rak (${orderedRaks.length} rak)`;
+        }
+
+        function getFiltered() {
+            const q = document.getElementById('searchInput').value.toLowerCase().trim();
+            const tahun = document.getElementById('tahunFilter').value;
+            const rak = document.getElementById('rakFilter').value;
+            const ketemu = document.getElementById('ketemuFilter').value;
+            return allItems.filter(item => {
+                const matchText = !q || item.nup.toLowerCase().includes(q) || (item.judul || '').toLowerCase().includes(q);
+                const matchTahun = !tahun || item.tahun === tahun;
+                const matchRak = !rak || item.rak === rak;
+                const matchKetemu = !ketemu || (ketemu === 'sudah' ? item.ketemu : !item.ketemu);
+                return matchText && matchTahun && matchRak && matchKetemu;
+            });
         }
 
         function filterRows() {
-            const q = document.getElementById('searchInput').value.toLowerCase();
-            const tahun = document.getElementById('tahunFilter').value;
-            const filtered = sortItems(allItems, sortField, sortAsc).filter(item => {
-                const matchText = !q || item.nup.includes(q) || (item.judul || '').toLowerCase().includes(q);
-                const matchTahun = !tahun || item.tahun === tahun;
-                return matchText && matchTahun;
-            });
-            renderTable(filtered);
+            renderTable(getFiltered());
         }
 
         async function kirimItem(nup) {
@@ -1554,8 +1629,7 @@ EDIT_HTML = """
                     input.disabled = true;
                     btn.outerHTML = '<span class="text-[11px] text-emerald-400 font-semibold">✓ Terkirim</span>';
                     // Update stats
-                    const total = allItems.length;
-                    renderStats(total, submittedNups.size);
+                    renderStats();
                 } else {
                     btn.innerHTML = '✉️ Kirim';
                     btn.disabled = false;
@@ -1593,21 +1667,21 @@ async def search_nup(q: str = ""):
 
 @app.get("/api/unmatched")
 async def get_unmatched():
-    """Get items that don't match any rak (Lainnya tanpa Rak)."""
+    """Get items grouped per rak (termasuk 'Lainnya tanpa Rak').
+
+    Tiap item ditandai apakah NUP-nya sudah ada di spreadsheet sensus
+    ("ketemu") atau belum, serta apakah judul barunya sudah dikirim.
+    """
     csv_items = read_csv_local()
     sheet_items = await read_google_sheet()
     inventory_items = read_inventory()
     rak_config = load_rak_config()
     result = get_rak_progress(csv_items, sheet_items, inventory_items, rak_config)
-    unmatched = result.get("unmatched", [])
-    # Sort by NUP numerically
-    def nup_sort_key(item):
-        try:
-            return int(item["nup"])
-        except (ValueError, TypeError):
-            return 0
-    unmatched.sort(key=nup_sort_key)
-    # Get already-submitted NUPs from Sheet2
+
+    # NUP yang sudah ada di spreadsheet sensus → "Sudah Ketemu"
+    sheet_nups = {str(si["nup"]).strip() for si in sheet_items}
+
+    # NUP yang judul barunya sudah dikirim dari menu Edit Judul
     submitted_nups = set()
     edit_sheet_id = EDIT_SHEET_ID
     if edit_sheet_id:
@@ -1616,17 +1690,74 @@ async def get_unmatched():
             if svc:
                 existing = svc.spreadsheets().values().get(
                     spreadsheetId=edit_sheet_id,
-                    range="Sheet2!B:C"
+                    range="Sheet2!A:C"
                 ).execute()
-                for row in existing.get("values", [][1:]):  # skip header
-                    if len(row) >= 2 and row[1].strip():
-                        submitted_nups.add(row[0].strip())
+                for row in existing.get("values", [])[1:]:  # skip header
+                    if len(row) >= 2 and str(row[1]).strip():
+                        submitted_nups.add(str(row[1]).strip())
         except Exception:
             pass
-    # Mark items that have already been submitted
-    for item in unmatched:
-        item["submitted"] = item["nup"] in submitted_nups
-    return {"items": unmatched, "total": len(unmatched), "submitted_count": len(submitted_nups)}
+
+    def decorate(item, kategori):
+        nup = str(item.get("nup", "")).strip()
+        return {
+            "nup": nup,
+            "judul": item.get("judul", ""),
+            "kodifikasi": item.get("kodifikasi", ""),
+            "tahun": item.get("tahun", ""),
+            "kategori": kategori,
+            "ketemu": nup in sheet_nups,
+            "submitted": nup in submitted_nups,
+        }
+
+    def nup_sort_key(item):
+        try:
+            return (0, int(item["nup"]))
+        except (ValueError, TypeError):
+            return (1, 0)
+
+    groups = []
+    for rak in rak_config:
+        data = result["raks"].get(rak["name"])
+        if not data:
+            continue
+        items = []
+        for cat in ("belum_ditemukan", "ditemukan_belum_sensus", "sudah_sensus_belum_kirim", "sensus_ditemukan"):
+            items.extend(decorate(it, cat) for it in data.get(cat, []))
+        if not items:
+            continue
+        items.sort(key=nup_sort_key)
+        groups.append({
+            "name": rak["name"],
+            "category": rak.get("category", ""),
+            "prefix": rak.get("prefix", ""),
+            "start": rak.get("start", 0),
+            "end": rak.get("end", 0),
+            "items": items,
+        })
+
+    unmatched = result.get("unmatched", [])
+    if unmatched:
+        items = [decorate(it, it.get("category", "")) for it in unmatched]
+        items.sort(key=nup_sort_key)
+        groups.append({
+            "name": "Lainnya (Tanpa Rak)",
+            "category": "Tanpa Rak",
+            "prefix": "",
+            "start": 0,
+            "end": 0,
+            "items": items,
+        })
+
+    all_items = [it for g in groups for it in g["items"]]
+    ketemu_count = sum(1 for it in all_items if it["ketemu"])
+    return {
+        "groups": groups,
+        "total": len(all_items),
+        "ketemu_count": ketemu_count,
+        "belum_ketemu_count": len(all_items) - ketemu_count,
+        "submitted_count": sum(1 for it in all_items if it["submitted"]),
+    }
 
 
 @app.post("/api/save-edit")
